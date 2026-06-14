@@ -1,0 +1,36 @@
+{
+  "name": "obsidian-ttsreader",
+  "version": "0.1.0",
+  "description": "TTSReader SDK and Obsidian plugin",
+  "main": "dist/main.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && esbuild src/plugin.ts --bundle --platform=browser --format=cjs --external:obsidian --outfile=dist/main.js",
+    "test": "node --test --loader ts-node/esm tests/*.test.ts",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "update:voices": "node scripts/update-ttsreader-voices.mjs"
+  },
+  "keywords": [
+    "obsidian",
+    "tts",
+    "ttsreader",
+    "text-to-speech"
+  ],
+  "author": "sundy-li",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sundy-li/obsidian-ttsreader.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sundy-li/obsidian-ttsreader/issues"
+  },
+  "homepage": "https://github.com/sundy-li/obsidian-ttsreader#readme",
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "esbuild": "^0.25.5",
+    "obsidian": "^1.8.7",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
+  }
+}

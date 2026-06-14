@@ -1,0 +1,67 @@
+.ttsreader-plugin-control {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.ttsreader-plugin-control textarea {
+  min-height: 120px;
+}
+
+.ttsreader-plugin-control select,
+.ttsreader-plugin-control input[type="range"] {
+  width: 100%;
+}
+
+.ttsreader-plugin-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.ttsreader-plugin-row label {
+  color: var(--text-muted);
+  flex: 0 0 138px;
+}
+
+.ttsreader-plugin-row > * {
+  flex: 1;
+}
+
+.ttsreader-plugin-voice-row select {
+  min-width: 0;
+}
+
+.ttsreader-plugin-sample-button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.ttsreader-plugin-filter-row {
+  align-items: stretch;
+}
+
+.ttsreader-plugin-filter-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.ttsreader-plugin-filter-buttons button {
+  flex: 1;
+}
+
+.ttsreader-plugin-filter-buttons .ttsreader-plugin-filter-active {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.ttsreader-plugin-premium-usage {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.ttsreader-plugin-status {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}

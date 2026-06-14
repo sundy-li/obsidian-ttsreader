@@ -1,0 +1,563 @@
+import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, requestUrl } from "obsidian";
+
+import { TtsReaderClient, type TtsReaderVoice, isServerVoice } from "./sdk.js";
+import { makeObsidianFetch } from "./obsidian-fetch.js";
+import {
+  DEFAULT_SETTINGS,
+  PREMIUM_CHAR_LIMIT,
+  type VoiceFilter,
+  type TtsReaderPluginSettings,
+  chooseInitialVoiceId,
+  filterVoicesForSelection,
+  formatPremiumUsage,
+  getPremiumUsageAfterRead,
+  getReadableText,
+  getVoiceDemoUrl,
+  groupVoicesByLanguage,
+  mergeSettings,
+  type VoiceLanguageGroup,
+} from "./plugin-state.js";
+
+const TTSREADER_SIGN_IN_URL = "https://ttsreader.com/player/";
+
+export default class TtsReaderPlugin extends Plugin {
+  settings: TtsReaderPluginSettings = DEFAULT_SETTINGS;
+  private currentAudio: HTMLAudioElement | null = null;
+  private currentObjectUrl: string | null = null;
+
+  async onload(): Promise<void> {
+    this.settings = mergeSettings(await this.loadData());
+
+    this.addRibbonIcon("volume-2", "TTSReader", () => {
+      this.openReader();
+    });
+
+    this.addCommand({
+      id: "open-ttsreader",
+      name: "Open TTSReader",
+      callback: () => this.openReader(),
+    });
+
+    this.addCommand({
+      id: "speak-selection-or-note",
+      name: "Speak selection or current note",
+      editorCallback: (editor) => {
+        const text = getReadableText(editor.getValue(), editor.getSelection());
+        this.openReader(text);
+      },
+    });
+
+    this.addCommand({
+      id: "read-selected-text",
+      name: "Read the selected text",
+      editorCallback: (editor) => {
+        this.readSelectedText(editor.getSelection());
+      },
+    });
+
+    this.addCommand({
+      id: "stop-ttsreader",
+      name: "Stop TTSReader playback",
+      callback: () => this.stopPlayback(),
+    });
+
+    this.addCommand({
+      id: "open-ttsreader-sign-in",
+      name: "Open TTSReader sign-in page",
+      callback: () => this.openTtsReaderSignIn(),
+    });
+
+    this.registerEvent(
+      this.app.workspace.on("editor-menu", (menu, editor) => {
+        menu.addItem((item) => {
+          item
+            .setTitle("Read the selected text")
+            .setIcon("volume-2")
+            .setDisabled(!editor.getSelection().trim())
+            .onClick(() => this.readSelectedText(editor.getSelection()));
+        });
+      }),
+    );
+
+    this.addSettingTab(new TtsReaderSettingTab(this.app, this));
+  }
+
+  onunload(): void {
+    this.stopPlayback();
+  }
+
+  async saveSettings(): Promise<void> {
+    await this.saveData(this.settings);
+  }
+
+  openReader(initialText = ""): void {
+    new TtsReaderModal(this.app, this, initialText).open();
+  }
+
+  openTtsReaderSignIn(): void {
+    window.open(TTSREADER_SIGN_IN_URL, "_blank", "noopener");
+    new Notice("TTSReader sign-in opened. Browser cookies are not shared with Obsidian.");
+  }
+
+  async readSelectedText(selectedText: string): Promise<void> {
+    const text = selectedText.trim();
+    if (!text) {
+      new Notice("TTSReader: select text to read first.");
+      return;
+    }
+
+    const voices = await waitForVoices();
+    const voice = this.chooseConfiguredVoice(voices);
+    if (!voice) {
+      new Notice("TTSReader: no voice is available.");
+      return;
+    }
+
+    if (voice.isPremium) {
+      const usage = getPremiumUsageAfterRead(this.settings.premiumCharsUsed, text);
+      if (usage.exceeded) {
+        new Notice(`TTSReader: premium voice limit exceeded: ${usage.used.toLocaleString()} / ${PREMIUM_CHAR_LIMIT.toLocaleString()} chars.`);
+        return;
+      }
+    }
+
+    await this.speak(text, voice.id, this.settings.defaultRate, this.settings.preferredMode);
+
+    if (voice.isPremium) {
+      this.settings.premiumCharsUsed = getPremiumUsageAfterRead(this.settings.premiumCharsUsed, text).used;
+      await this.saveSettings();
+    }
+  }
+
+  async playVoiceSample(voice: TtsReaderVoice, rate: number, mode: TtsReaderPluginSettings["preferredMode"]): Promise<void> {
+    const demoUrl = getVoiceDemoUrl(voice);
+    if (demoUrl) {
+      await this.playRemoteAudio(demoUrl);
+      return;
+    }
+
+    const sampleText = `Hello, this is ${voice.name}.`;
+    await this.speak(sampleText, voice.id, rate, mode);
+  }
+
+  async speak(text: string, voiceId: string, rate: number, mode: TtsReaderPluginSettings["preferredMode"]): Promise<void> {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      new Notice("TTSReader: no text to read.");
+      return;
+    }
+
+    this.stopPlayback();
+
+    if (!isServerVoice(voiceId)) {
+      this.speakWithBrowserVoice(trimmed, voiceId, rate);
+      return;
+    }
+
+    const voice = getServerAndBrowserVoices().find((candidate) => candidate.id === voiceId);
+    const client = new TtsReaderClient({
+      apiKey: this.settings.apiKey || undefined,
+      fetch: makeObsidianFetch(requestUrl),
+    });
+    const audio = await client.synthesize({
+      text: trimmed,
+      voiceId,
+      lang: voice?.lang ?? "en-US",
+      rate,
+      mode: mode === "uapi-export" ? "uapi-export" : "cloud-playback",
+      isTest: true,
+      quality: "48khz_192kbps",
+    });
+
+    const audioBuffer = audio.bytes.buffer.slice(
+      audio.bytes.byteOffset,
+      audio.bytes.byteOffset + audio.bytes.byteLength,
+    ) as ArrayBuffer;
+    const blob = new Blob([audioBuffer], { type: audio.contentType });
+    this.currentObjectUrl = URL.createObjectURL(blob);
+    this.currentAudio = new Audio(this.currentObjectUrl);
+    await this.currentAudio.play();
+  }
+
+  stopPlayback(): void {
+    speechSynthesis.cancel();
+    if (this.currentAudio) {
+      this.currentAudio.pause();
+      this.currentAudio.currentTime = 0;
+      this.currentAudio = null;
+    }
+    if (this.currentObjectUrl) {
+      URL.revokeObjectURL(this.currentObjectUrl);
+      this.currentObjectUrl = null;
+    }
+  }
+
+  private speakWithBrowserVoice(text: string, voiceId: string, rate: number): void {
+    const utterance = new SpeechSynthesisUtterance(text);
+    const voice = speechSynthesis.getVoices().find((candidate) => candidate.voiceURI === voiceId);
+    if (voice) {
+      utterance.voice = voice;
+      utterance.lang = voice.lang;
+    }
+    utterance.rate = Math.min(2, Math.max(0.5, rate));
+    speechSynthesis.speak(utterance);
+  }
+
+  private chooseConfiguredVoice(voices: TtsReaderVoice[]): TtsReaderVoice | undefined {
+    const filtered = filterVoicesForSelection(voices, {
+      languageCode: this.settings.preferredLanguageCode,
+      accentCode: this.settings.preferredAccentCode,
+      voiceFilter: this.settings.voiceFilter,
+    });
+    return (
+      filtered.find((voice) => voice.id === this.settings.preferredVoiceId) ??
+      voices.find((voice) => voice.id === this.settings.preferredVoiceId) ??
+      filtered[0] ??
+      voices[0]
+    );
+  }
+
+  private async playRemoteAudio(url: string): Promise<void> {
+    this.stopPlayback();
+    const response = await makeObsidianFetch(requestUrl)(url);
+    if (!response.ok) {
+      throw new Error(`Voice sample request failed: ${response.status} ${response.statusText}`);
+    }
+    const blob = new Blob([await response.arrayBuffer()], {
+      type: response.headers.get("content-type") ?? "audio/mpeg",
+    });
+    this.currentObjectUrl = URL.createObjectURL(blob);
+    this.currentAudio = new Audio(this.currentObjectUrl);
+    await this.currentAudio.play();
+  }
+}
+
+class TtsReaderModal extends Modal {
+  private readonly plugin: TtsReaderPlugin;
+  private readonly initialText: string;
+  private textArea!: HTMLTextAreaElement;
+  private languageSelect!: HTMLSelectElement;
+  private accentSelect!: HTMLSelectElement;
+  private voiceSelect!: HTMLSelectElement;
+  private sampleButton!: HTMLButtonElement;
+  private modeSelect!: HTMLSelectElement;
+  private rateInput!: HTMLInputElement;
+  private premiumUsageEl!: HTMLElement;
+  private statusEl!: HTMLElement;
+  private voices: TtsReaderVoice[] = [];
+  private languageGroups: VoiceLanguageGroup[] = [];
+  private voiceFilter: VoiceFilter = "all";
+
+  constructor(app: App, plugin: TtsReaderPlugin, initialText: string) {
+    super(app);
+    this.plugin = plugin;
+    this.initialText = initialText;
+  }
+
+  async onOpen(): Promise<void> {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl("h2", { text: "TTSReader" });
+
+    this.voices = await waitForVoices();
+    this.languageGroups = groupVoicesByLanguage(this.voices);
+    this.voiceFilter = this.plugin.settings.voiceFilter;
+
+    const wrapper = contentEl.createDiv({ cls: "ttsreader-plugin-control" });
+    this.textArea = wrapper.createEl("textarea");
+    this.textArea.value = this.initialText;
+    this.textArea.placeholder = "Text to speech";
+
+    const languageRow = wrapper.createDiv({ cls: "ttsreader-plugin-row" });
+    languageRow.createEl("label", { text: "Reading Language" });
+    this.languageSelect = languageRow.createEl("select");
+    for (const group of this.languageGroups) {
+      this.languageSelect.createEl("option", {
+        value: group.languageCode,
+        text: `${group.flag} ${group.name}`.trim(),
+      });
+    }
+    this.languageSelect.value = this.chooseLanguageCode();
+    this.languageSelect.addEventListener("change", () => {
+      this.plugin.settings.preferredLanguageCode = this.languageSelect.value;
+      this.plugin.settings.preferredAccentCode = "";
+      this.populateAccentSelect();
+      this.populateVoiceSelect();
+    });
+
+    const accentRow = wrapper.createDiv({ cls: "ttsreader-plugin-row" });
+    accentRow.createEl("label", { text: "Region / Accent" });
+    this.accentSelect = accentRow.createEl("select");
+    this.accentSelect.addEventListener("change", () => {
+      this.plugin.settings.preferredAccentCode = this.accentSelect.value;
+      this.populateVoiceSelect();
+    });
+
+    const modeRow = wrapper.createDiv({ cls: "ttsreader-plugin-row" });
+    modeRow.createEl("label", { text: "Mode" });
+    this.modeSelect = modeRow.createEl("select");
+    this.modeSelect.createEl("option", { value: "cloud-playback", text: "Cloud playback" });
+    this.modeSelect.createEl("option", { value: "uapi-export", text: "UAPI export" });
+    this.modeSelect.value = this.plugin.settings.preferredMode;
+
+    const rateRow = wrapper.createDiv({ cls: "ttsreader-plugin-row" });
+    rateRow.createEl("label", { text: "Playback Speed" });
+    this.rateInput = rateRow.createEl("input", { type: "range" });
+    this.rateInput.min = "0.5";
+    this.rateInput.max = "2";
+    this.rateInput.step = "0.05";
+    this.rateInput.value = String(this.plugin.settings.defaultRate);
+    const rateValue = rateRow.createEl("span", { text: this.rateInput.value });
+    this.rateInput.addEventListener("input", () => {
+      rateValue.setText(Number(this.rateInput.value).toFixed(2).replace(/0$/, "").replace(/\.0$/, ""));
+    });
+
+    const filterRow = wrapper.createDiv({ cls: "ttsreader-plugin-row ttsreader-plugin-filter-row" });
+    filterRow.createEl("label", { text: "Voice Selection" });
+    const filterButtons = filterRow.createDiv({ cls: "ttsreader-plugin-filter-buttons" });
+    for (const filter of ["all", "premium", "basic"] as const) {
+      const label = filter === "all" ? "All" : filter === "premium" ? "Premium" : "Basic";
+      const button = filterButtons.createEl("button", {
+        text: label,
+        cls: filter === this.voiceFilter ? "ttsreader-plugin-filter-active" : "",
+      });
+      button.addEventListener("click", () => {
+        this.voiceFilter = filter;
+        this.plugin.settings.voiceFilter = filter;
+        filterButtons.querySelectorAll("button").forEach((candidate) => {
+          candidate.removeClass("ttsreader-plugin-filter-active");
+        });
+        button.addClass("ttsreader-plugin-filter-active");
+        this.populateVoiceSelect();
+      });
+    }
+
+    const voiceRow = wrapper.createDiv({ cls: "ttsreader-plugin-row ttsreader-plugin-voice-row" });
+    this.voiceSelect = voiceRow.createEl("select");
+    this.voiceSelect.addEventListener("change", () => {
+      this.plugin.settings.preferredVoiceId = this.voiceSelect.value;
+    });
+    this.sampleButton = voiceRow.createEl("button", {
+      text: "Play sample",
+      cls: "ttsreader-plugin-sample-button",
+    });
+    this.sampleButton.addEventListener("click", () => this.playSample());
+    this.premiumUsageEl = wrapper.createDiv({ cls: "ttsreader-plugin-premium-usage" });
+
+    const buttonRow = wrapper.createDiv({ cls: "ttsreader-plugin-row" });
+    const playButton = buttonRow.createEl("button", { text: "Play" });
+    const stopButton = buttonRow.createEl("button", { text: "Stop" });
+    playButton.addEventListener("click", () => this.play());
+    stopButton.addEventListener("click", () => this.plugin.stopPlayback());
+
+    this.statusEl = wrapper.createDiv({ cls: "ttsreader-plugin-status" });
+    this.populateAccentSelect();
+    this.populateVoiceSelect();
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+
+  private async play(): Promise<void> {
+    this.statusEl.setText("Preparing audio...");
+    try {
+      const voiceId = this.voiceSelect.value;
+      const mode = this.modeSelect.value as TtsReaderPluginSettings["preferredMode"];
+      const rate = Number(this.rateInput.value) || 1;
+      const voice = this.voices.find((candidate) => candidate.id === voiceId);
+      if (voice?.isPremium) {
+        const usage = getPremiumUsageAfterRead(this.plugin.settings.premiumCharsUsed, this.textArea.value);
+        if (usage.exceeded) {
+          const message = `Premium voice limit exceeded: ${usage.used.toLocaleString()} / ${PREMIUM_CHAR_LIMIT.toLocaleString()} chars.`;
+          this.statusEl.setText(message);
+          new Notice(`TTSReader: ${message}`);
+          return;
+        }
+      }
+      this.plugin.settings.preferredVoiceId = voiceId;
+      this.plugin.settings.preferredMode = mode;
+      this.plugin.settings.defaultRate = rate;
+      this.plugin.settings.preferredLanguageCode = this.languageSelect.value;
+      this.plugin.settings.preferredAccentCode = this.accentSelect.value;
+      this.plugin.settings.voiceFilter = this.voiceFilter;
+      await this.plugin.saveSettings();
+      await this.plugin.speak(this.textArea.value, voiceId, rate, mode);
+      if (voice?.isPremium) {
+        this.plugin.settings.premiumCharsUsed = getPremiumUsageAfterRead(
+          this.plugin.settings.premiumCharsUsed,
+          this.textArea.value,
+        ).used;
+        await this.plugin.saveSettings();
+        this.updatePremiumUsage();
+      }
+      this.statusEl.setText("Playing");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.statusEl.setText(message);
+      new Notice(`TTSReader: ${message}`);
+    }
+  }
+
+  private async playSample(): Promise<void> {
+    this.statusEl.setText("Preparing sample...");
+    try {
+      const voice = this.voices.find((candidate) => candidate.id === this.voiceSelect.value);
+      if (!voice) {
+        this.statusEl.setText("No voice selected");
+        return;
+      }
+      await this.plugin.playVoiceSample(
+        voice,
+        Number(this.rateInput.value) || 1,
+        this.modeSelect.value as TtsReaderPluginSettings["preferredMode"],
+      );
+      this.statusEl.setText("Playing sample");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.statusEl.setText(message);
+      new Notice(`TTSReader: ${message}`);
+    }
+  }
+
+  private chooseLanguageCode(): string {
+    const configured = this.plugin.settings.preferredLanguageCode;
+    if (configured && this.languageGroups.some((group) => group.languageCode === configured)) {
+      return configured;
+    }
+
+    return this.languageGroups[0]?.languageCode ?? "";
+  }
+
+  private populateAccentSelect(): void {
+    this.accentSelect.empty();
+    const group = this.languageGroups.find((candidate) => candidate.languageCode === this.languageSelect.value);
+    const accents = group?.accents ?? [];
+    for (const accent of accents) {
+      this.accentSelect.createEl("option", {
+        value: accent.code,
+        text: `${accent.flag} ${accent.name}`.trim(),
+      });
+    }
+
+    const preferred = this.plugin.settings.preferredAccentCode;
+    this.accentSelect.value = accents.some((accent) => accent.code === preferred) ? preferred : accents[0]?.code ?? "";
+  }
+
+  private populateVoiceSelect(): void {
+    this.voiceSelect.empty();
+    const filtered = filterVoicesForSelection(this.voices, {
+      languageCode: this.languageSelect.value,
+      accentCode: this.accentSelect.value,
+      voiceFilter: this.voiceFilter,
+    });
+    const selectedVoiceId = chooseInitialVoiceId(filtered, this.plugin.settings.preferredVoiceId);
+
+    for (const voice of filtered) {
+      const badge = voice.isPremium ? "Premium" : "Basic";
+      const source = voice.source === "browser" ? "Browser" : "TTSReader";
+      const label = `${voice.name} (${badge}, ${source})`;
+      this.voiceSelect.createEl("option", { value: voice.id, text: label });
+    }
+
+    this.voiceSelect.value = selectedVoiceId;
+    this.sampleButton.disabled = !selectedVoiceId;
+    this.updatePremiumUsage();
+    this.statusEl.setText(`${filtered.length} of ${this.voices.length} voices shown`);
+  }
+
+  private updatePremiumUsage(): void {
+    this.premiumUsageEl.setText(formatPremiumUsage(this.plugin.settings.premiumCharsUsed));
+  }
+}
+
+class TtsReaderSettingTab extends PluginSettingTab {
+  private readonly plugin: TtsReaderPlugin;
+
+  constructor(app: App, plugin: TtsReaderPlugin) {
+    super(app, plugin);
+    this.plugin = plugin;
+  }
+
+  display(): void {
+    const { containerEl } = this;
+    containerEl.empty();
+    containerEl.createEl("h2", { text: "TTSReader" });
+
+    new Setting(containerEl)
+      .setName("TTSReader UAPI key")
+      .setDesc("Optional. Used only for the official /api/ttsSync export mode.")
+      .addText((text) => {
+        text
+          .setPlaceholder("UAPI-...")
+          .setValue(this.plugin.settings.apiKey)
+          .onChange(async (value) => {
+            this.plugin.settings.apiKey = value.trim().replace(/^Bearer\s+/i, "").replace(/^UAPI-/, "");
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Default rate")
+      .addSlider((slider) => {
+        slider
+          .setLimits(0.5, 2, 0.05)
+          .setValue(this.plugin.settings.defaultRate)
+          .setDynamicTooltip()
+          .onChange(async (value) => {
+            this.plugin.settings.defaultRate = value;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Default server mode")
+      .setDesc("Cloud playback mirrors the website player. UAPI export requires an API key.")
+      .addDropdown((dropdown) => {
+        dropdown
+          .addOption("cloud-playback", "Cloud playback")
+          .addOption("uapi-export", "UAPI export")
+          .setValue(this.plugin.settings.preferredMode)
+          .onChange(async (value) => {
+            this.plugin.settings.preferredMode = value as TtsReaderPluginSettings["preferredMode"];
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Premium account sign-in")
+      .setDesc(
+        "Opens the TTSReader player in your browser. Obsidian cannot read Google/Apple login cookies from that browser session; use the UAPI key for authenticated export mode.",
+      )
+      .addButton((button) => {
+        button
+          .setButtonText("Open TTSReader")
+          .onClick(() => this.plugin.openTtsReaderSignIn());
+      });
+  }
+}
+
+async function waitForVoices(): Promise<TtsReaderVoice[]> {
+  const browserVoices = await waitForBrowserVoices();
+  return getServerAndBrowserVoices(browserVoices);
+}
+
+function getServerAndBrowserVoices(browserVoices?: SpeechSynthesisVoice[]): TtsReaderVoice[] {
+  const client = new TtsReaderClient();
+  return client.listVoices(browserVoices);
+}
+
+async function waitForBrowserVoices(): Promise<SpeechSynthesisVoice[]> {
+  const immediate = speechSynthesis.getVoices();
+  if (immediate.length > 0) {
+    return immediate;
+  }
+
+  return new Promise((resolve) => {
+    const timeout = window.setTimeout(() => resolve(speechSynthesis.getVoices()), 1000);
+    speechSynthesis.onvoiceschanged = () => {
+      window.clearTimeout(timeout);
+      resolve(speechSynthesis.getVoices());
+    };
+  });
+}
