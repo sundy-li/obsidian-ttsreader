@@ -148,6 +148,10 @@ export function getPremiumUsageAfterRead(
   };
 }
 
+export function shouldCountPremiumUsage(isPremiumVoice: boolean, mode: TtsReaderPluginSettings["preferredMode"]): boolean {
+  return isPremiumVoice && mode === "uapi-export";
+}
+
 export function getVoiceDemoUrl(voice: TtsReaderVoice): string {
   if (!voice.demo) {
     return "";

@@ -15,6 +15,7 @@ import {
   getVoiceDemoUrl,
   groupVoicesByLanguage,
   mergeSettings,
+  shouldCountPremiumUsage,
   type VoiceLanguageGroup,
 } from "./plugin-state.js";
 
@@ -69,12 +70,13 @@ export default class TtsReaderPlugin extends Plugin {
 
     this.registerEvent(
       this.app.workspace.on("editor-menu", (menu, editor) => {
+        const selectedText = editor.getSelection();
         menu.addItem((item) => {
           item
             .setTitle("Read the selected text")
             .setIcon("volume-2")
-            .setDisabled(!editor.getSelection().trim())
-            .onClick(() => this.readSelectedText(editor.getSelection()));
+            .setDisabled(!selectedText.trim())
+            .onClick(() => this.readSelectedText(selectedText));
         });
       }),
     );
@@ -113,7 +115,7 @@ export default class TtsReaderPlugin extends Plugin {
       return;
     }
 
-    if (voice.isPremium) {
+    if (shouldCountPremiumUsage(voice.isPremium, this.settings.preferredMode)) {
       const usage = getPremiumUsageAfterRead(this.settings.premiumCharsUsed, text);
       if (usage.exceeded) {
         new Notice(`TTSReader: premium voice limit exceeded: ${usage.used.toLocaleString()} / ${PREMIUM_CHAR_LIMIT.toLocaleString()} chars.`);
@@ -123,7 +125,7 @@ export default class TtsReaderPlugin extends Plugin {
 
     await this.speak(text, voice.id, this.settings.defaultRate, this.settings.preferredMode);
 
-    if (voice.isPremium) {
+    if (shouldCountPremiumUsage(voice.isPremium, this.settings.preferredMode)) {
       this.settings.premiumCharsUsed = getPremiumUsageAfterRead(this.settings.premiumCharsUsed, text).used;
       await this.saveSettings();
     }
@@ -137,7 +139,13 @@ export default class TtsReaderPlugin extends Plugin {
     }
 
     const sampleText = `Hello, this is ${voice.name}.`;
-    await this.speak(sampleText, voice.id, rate, mode);
+    if (!isServerVoice(voice.id)) {
+      this.stopPlayback();
+      this.speakWithBrowserVoice(sampleText, voice.id, rate);
+      return;
+    }
+
+    await this.speakWithServerVoice(sampleText, voice, rate, mode, true);
   }
 
   async speak(text: string, voiceId: string, rate: number, mode: TtsReaderPluginSettings["preferredMode"]): Promise<void> {
@@ -155,17 +163,38 @@ export default class TtsReaderPlugin extends Plugin {
     }
 
     const voice = getServerAndBrowserVoices().find((candidate) => candidate.id === voiceId);
+    if (mode === "cloud-playback") {
+      await this.speakWithBrowserFallback(trimmed, voice?.lang, rate);
+      new Notice("TTSReader: server voices need UAPI export for custom text. Using a browser voice for this text.");
+      return;
+    }
+
+    if (!voice) {
+      throw new Error(`TTSReader voice not found: ${voiceId}`);
+    }
+
+    await this.speakWithServerVoice(trimmed, voice, rate, mode, false);
+  }
+
+  private async speakWithServerVoice(
+    text: string,
+    voice: TtsReaderVoice,
+    rate: number,
+    mode: TtsReaderPluginSettings["preferredMode"],
+    isTest: boolean,
+  ): Promise<void> {
+    this.stopPlayback();
     const client = new TtsReaderClient({
       apiKey: this.settings.apiKey || undefined,
       fetch: makeObsidianFetch(requestUrl),
     });
     const audio = await client.synthesize({
-      text: trimmed,
-      voiceId,
-      lang: voice?.lang ?? "en-US",
+      text,
+      voiceId: voice.id,
+      lang: voice.lang,
       rate,
       mode: mode === "uapi-export" ? "uapi-export" : "cloud-playback",
-      isTest: true,
+      isTest,
       quality: "48khz_192kbps",
     });
 
@@ -177,6 +206,19 @@ export default class TtsReaderPlugin extends Plugin {
     this.currentObjectUrl = URL.createObjectURL(blob);
     this.currentAudio = new Audio(this.currentObjectUrl);
     await this.currentAudio.play();
+  }
+
+  private async speakWithBrowserFallback(text: string, lang: string | undefined, rate: number): Promise<void> {
+    const browserVoices = await waitForBrowserVoices();
+    const fallback =
+      findBrowserVoice(browserVoices, lang) ??
+      browserVoices[0];
+
+    if (!fallback) {
+      throw new Error("TTSReader server voice playback requires UAPI export for custom text.");
+    }
+
+    this.speakWithBrowserVoice(text, fallback.voiceURI, rate);
   }
 
   stopPlayback(): void {
@@ -366,7 +408,8 @@ class TtsReaderModal extends Modal {
       const mode = this.modeSelect.value as TtsReaderPluginSettings["preferredMode"];
       const rate = Number(this.rateInput.value) || 1;
       const voice = this.voices.find((candidate) => candidate.id === voiceId);
-      if (voice?.isPremium) {
+      const countPremiumUsage = shouldCountPremiumUsage(Boolean(voice?.isPremium), mode);
+      if (countPremiumUsage) {
         const usage = getPremiumUsageAfterRead(this.plugin.settings.premiumCharsUsed, this.textArea.value);
         if (usage.exceeded) {
           const message = `Premium voice limit exceeded: ${usage.used.toLocaleString()} / ${PREMIUM_CHAR_LIMIT.toLocaleString()} chars.`;
@@ -383,7 +426,7 @@ class TtsReaderModal extends Modal {
       this.plugin.settings.voiceFilter = this.voiceFilter;
       await this.plugin.saveSettings();
       await this.plugin.speak(this.textArea.value, voiceId, rate, mode);
-      if (voice?.isPremium) {
+      if (countPremiumUsage) {
         this.plugin.settings.premiumCharsUsed = getPremiumUsageAfterRead(
           this.plugin.settings.premiumCharsUsed,
           this.textArea.value,
@@ -545,6 +588,20 @@ async function waitForVoices(): Promise<TtsReaderVoice[]> {
 function getServerAndBrowserVoices(browserVoices?: SpeechSynthesisVoice[]): TtsReaderVoice[] {
   const client = new TtsReaderClient();
   return client.listVoices(browserVoices);
+}
+
+function findBrowserVoice(voices: SpeechSynthesisVoice[], lang: string | undefined): SpeechSynthesisVoice | undefined {
+  if (!lang) {
+    return voices[0];
+  }
+
+  const normalizedLang = lang.toLowerCase();
+  const languageCode = normalizedLang.split("-")[0];
+  return (
+    voices.find((voice) => voice.lang.toLowerCase() === normalizedLang) ??
+    voices.find((voice) => voice.lang.toLowerCase().split("-")[0] === languageCode) ??
+    voices[0]
+  );
 }
 
 async function waitForBrowserVoices(): Promise<SpeechSynthesisVoice[]> {

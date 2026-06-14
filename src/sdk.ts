@@ -120,7 +120,7 @@ export class TtsReaderClient {
         lang: options.lang,
         voice: options.voiceId,
         rate: normalizeCloudRate(options.rate),
-        isTest: options.isTest ?? true,
+        isTest: options.isTest ?? false,
       }),
     });
 

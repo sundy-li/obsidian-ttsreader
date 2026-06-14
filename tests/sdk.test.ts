@@ -101,7 +101,7 @@ describe("TTSReader SDK", () => {
     }
   });
 
-  it("defaults cloud playback to the anonymous website playback mode", async () => {
+  it("defaults cloud playback to custom text synthesis instead of test voice playback", async () => {
     const calls: Array<{ init: RequestInit }> = [];
     const fetcher: typeof fetch = async (_url, init) => {
       calls.push({ init: init ?? {} });
@@ -119,7 +119,7 @@ describe("TTSReader SDK", () => {
       mode: "cloud-playback",
     });
 
-    assert.equal(JSON.parse(String(calls[0].init.body)).isTest, true);
+    assert.equal(JSON.parse(String(calls[0].init.body)).isTest, false);
   });
 
   it("builds the official UAPI export request when an API key is provided", async () => {

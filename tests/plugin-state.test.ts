@@ -11,6 +11,7 @@ import {
   getReadableText,
   groupVoicesByLanguage,
   mergeSettings,
+  shouldCountPremiumUsage,
 } from "../src/plugin-state.js";
 
 describe("plugin state helpers", () => {
@@ -98,6 +99,12 @@ describe("plugin state helpers", () => {
       remaining: 0,
       exceeded: true,
     });
+  });
+
+  it("counts premium usage only when authenticated export can read custom server text", () => {
+    assert.equal(shouldCountPremiumUsage(true, "uapi-export"), true);
+    assert.equal(shouldCountPremiumUsage(true, "cloud-playback"), false);
+    assert.equal(shouldCountPremiumUsage(false, "uapi-export"), false);
   });
 
   it("builds absolute demo audio URLs for voice sample playback", () => {
