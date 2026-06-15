@@ -30,6 +30,7 @@ export const DEFAULT_SETTINGS: TtsReaderPluginSettings = {
 };
 
 export const PREMIUM_CHAR_LIMIT = 5000;
+export const AUDIO_CACHE_LIMIT = 16;
 
 export interface VoiceAccentGroup {
   code: string;
@@ -48,6 +49,17 @@ export interface VoiceSelectionFilter {
   languageCode: string;
   accentCode: string;
   voiceFilter: VoiceFilter;
+}
+
+export interface AudioCacheKeyParts {
+  text: string;
+  voiceId: string;
+  lang: string;
+  rate: number;
+  mode: TtsReaderPluginSettings["preferredMode"];
+  isTest: boolean;
+  credentialKind: CredentialKind;
+  credentialFingerprint: string;
 }
 
 export function mergeSettings(settings: Partial<TtsReaderPluginSettings> | null | undefined): TtsReaderPluginSettings {
@@ -214,6 +226,61 @@ export function getCredentialParts(value: string): {
     return { kind, cloudBearerToken: normalizeBearerToken(value) };
   }
   return { kind };
+}
+
+export function fingerprintCredential(value: string): string {
+  const credential = normalizeCredential(value);
+  if (!credential) {
+    return "";
+  }
+
+  let hash = 2166136261;
+  for (let index = 0; index < credential.length; index += 1) {
+    hash ^= credential.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16);
+}
+
+export function buildAudioCacheKey(parts: AudioCacheKeyParts): string {
+  return JSON.stringify({
+    text: parts.text.trim(),
+    voiceId: parts.voiceId,
+    lang: parts.lang,
+    rate: parts.rate,
+    mode: parts.mode,
+    isTest: parts.isTest,
+    credentialKind: parts.credentialKind,
+    credentialFingerprint: parts.credentialFingerprint,
+  });
+}
+
+export function putBoundedCacheEntry<K, V>(cache: Map<K, V>, key: K, value: V, limit = AUDIO_CACHE_LIMIT): void {
+  if (cache.has(key)) {
+    cache.delete(key);
+  }
+  cache.set(key, value);
+
+  while (cache.size > limit) {
+    const oldestKey = cache.keys().next().value as K | undefined;
+    if (oldestKey === undefined) {
+      return;
+    }
+    cache.delete(oldestKey);
+  }
+}
+
+export function getBoundedCacheEntry<K, V>(cache: Map<K, V>, key: K): V | undefined {
+  if (!cache.has(key)) {
+    return undefined;
+  }
+
+  const value = cache.get(key);
+  if (value !== undefined) {
+    cache.delete(key);
+    cache.set(key, value);
+  }
+  return value;
 }
 
 export function getVoiceDemoUrl(voice: TtsReaderVoice): string {

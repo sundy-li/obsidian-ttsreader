@@ -1,6 +1,6 @@
 {
   "name": "obsidian-ttsreader",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "TTSReader SDK and Obsidian plugin",
   "main": "dist/main.js",
   "type": "module",

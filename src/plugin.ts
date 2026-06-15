@@ -7,9 +7,13 @@ import {
   PREMIUM_CHAR_LIMIT,
   type VoiceFilter,
   type TtsReaderPluginSettings,
+  AUDIO_CACHE_LIMIT,
+  buildAudioCacheKey,
   chooseInitialVoiceId,
   filterVoicesForSelection,
+  fingerprintCredential,
   formatPremiumUsage,
+  getBoundedCacheEntry,
   getCredentialParts,
   getPremiumUsageAfterRead,
   getReadableText,
@@ -17,6 +21,7 @@ import {
   groupVoicesByLanguage,
   mergeSettings,
   normalizeCredential,
+  putBoundedCacheEntry,
   resolveServerCustomTextMode,
   shouldCountPremiumUsage,
   type VoiceLanguageGroup,
@@ -29,10 +34,10 @@ export default class TtsReaderPlugin extends Plugin {
   settings: TtsReaderPluginSettings = DEFAULT_SETTINGS;
   private currentAudio: HTMLAudioElement | null = null;
   private currentObjectUrl: string | null = null;
+  private readonly audioCache = new Map<string, { bytes: Uint8Array; contentType: string }>();
   private statusBarEl!: HTMLElement;
   private statusLabelEl!: HTMLElement;
   private statusTimeEl!: HTMLElement;
-  private statusProgressEl!: HTMLElement;
   private statusTimer: number | null = null;
   private browserSpeechStartedAt = 0;
   private browserSpeechEstimatedDuration = 0;
@@ -178,7 +183,9 @@ export default class TtsReaderPlugin extends Plugin {
 
     const voice = getServerAndBrowserVoices().find((candidate) => candidate.id === voiceId);
     if (!voice) {
-      throw new Error(`TTSReader voice not found: ${voiceId}`);
+      const message = `TTSReader voice not found: ${voiceId}`;
+      this.showPlaybackError(message);
+      throw new Error(message);
     }
 
     const credential = getCredentialParts(this.settings.credential);
@@ -188,9 +195,9 @@ export default class TtsReaderPlugin extends Plugin {
       Boolean(credential.cloudBearerToken),
     );
     if (!serverMode) {
-      throw new Error(
-        "Selected TTSReader voices can preview samples, but custom text requires a UAPI key or Cloud Bearer token. Add authorization in settings or choose a browser voice.",
-      );
+      const message = "Selected TTSReader voices can preview samples, but custom text requires a UAPI key or Cloud Bearer token. Add authorization in settings or choose a browser voice.";
+      this.showPlaybackError(message);
+      throw new Error(message);
     }
 
     await this.speakWithServerVoice(trimmed, voice, rate, serverMode, false);
@@ -210,7 +217,7 @@ export default class TtsReaderPlugin extends Plugin {
       cloudBearerToken: credential.cloudBearerToken,
       fetch: makeObsidianFetch(requestUrl),
     });
-    const audio = await client.synthesize({
+    const options = {
       text,
       voiceId: voice.id,
       lang: voice.lang,
@@ -218,18 +225,31 @@ export default class TtsReaderPlugin extends Plugin {
       mode: mode === "uapi-export" ? "uapi-export" : "cloud-playback",
       isTest,
       quality: "48khz_192kbps",
+    } as const;
+    const cacheKey = buildAudioCacheKey({
+      text,
+      voiceId: voice.id,
+      lang: voice.lang,
+      rate,
+      mode: options.mode,
+      isTest,
+      credentialKind: credential.kind,
+      credentialFingerprint: fingerprintCredential(this.settings.credential),
     });
+    const cachedAudio = getBoundedCacheEntry(this.audioCache, cacheKey);
+    let audio = cachedAudio;
+    if (!audio) {
+      try {
+        audio = await client.synthesize(options);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.showPlaybackError(message);
+        throw error;
+      }
+      putBoundedCacheEntry(this.audioCache, cacheKey, audio, AUDIO_CACHE_LIMIT);
+    }
 
-    const audioBuffer = audio.bytes.buffer.slice(
-      audio.bytes.byteOffset,
-      audio.bytes.byteOffset + audio.bytes.byteLength,
-    ) as ArrayBuffer;
-    const blob = new Blob([audioBuffer], { type: audio.contentType });
-    this.currentObjectUrl = URL.createObjectURL(blob);
-    this.currentAudio = new Audio(this.currentObjectUrl);
-    this.bindAudioStatus(this.currentAudio);
-    await this.currentAudio.play();
-    this.startAudioStatus(this.currentAudio);
+    await this.playAudioBytes(audio.bytes, audio.contentType);
   }
 
   stopPlayback(): void {
@@ -269,8 +289,6 @@ export default class TtsReaderPlugin extends Plugin {
 
     this.statusBarEl.createSpan({ cls: "ttsreader-plugin-statusbar-icon", text: "♫" });
     this.statusLabelEl = this.statusBarEl.createSpan({ cls: "ttsreader-plugin-statusbar-label", text: "TTSReader" });
-    const meter = this.statusBarEl.createSpan({ cls: "ttsreader-plugin-statusbar-meter" });
-    this.statusProgressEl = meter.createSpan({ cls: "ttsreader-plugin-statusbar-progress" });
     this.statusTimeEl = this.statusBarEl.createSpan({ cls: "ttsreader-plugin-statusbar-time", text: "--:--" });
   }
 
@@ -322,16 +340,16 @@ export default class TtsReaderPlugin extends Plugin {
   private updatePlaybackStatus(label: string, currentSeconds: number, totalSeconds: number): void {
     const duration = getFiniteDuration(totalSeconds);
     const current = Math.max(0, Math.min(currentSeconds, duration || currentSeconds));
-    const progress = duration > 0 ? Math.max(0, Math.min(100, (current / duration) * 100)) : 0;
 
     this.statusBarEl.removeClass("ttsreader-plugin-statusbar-idle");
+    this.statusBarEl.removeClass("ttsreader-plugin-statusbar-error");
     this.statusBarEl.addClass("ttsreader-plugin-statusbar-active");
+    this.statusBarEl.setAttribute("aria-label", `TTSReader playback status: ${label}`);
     this.statusLabelEl.setText(label);
     this.statusTimeEl.setText(duration > 0 ? `${formatTime(current)} / ${formatTime(duration)}` : formatTime(current));
-    this.statusProgressEl.style.width = `${progress}%`;
   }
 
-  private finishPlaybackStatus(label: string): void {
+  private finishPlaybackStatus(label: string, detail = ""): void {
     if (this.statusTimer !== null) {
       window.clearInterval(this.statusTimer);
       this.statusTimer = null;
@@ -341,9 +359,10 @@ export default class TtsReaderPlugin extends Plugin {
     }
     this.statusBarEl.removeClass("ttsreader-plugin-statusbar-active");
     this.statusBarEl.addClass("ttsreader-plugin-statusbar-idle");
+    this.statusBarEl.toggleClass("ttsreader-plugin-statusbar-error", label === "Error");
     this.statusLabelEl.setText(label);
-    this.statusTimeEl.setText("--:--");
-    this.statusProgressEl.style.width = "0%";
+    this.statusTimeEl.setText(detail ? shortenStatusDetail(detail) : "--:--");
+    this.statusBarEl.setAttribute("aria-label", detail ? `TTSReader playback status: ${label}. ${detail}` : `TTSReader playback status: ${label}`);
   }
 
   private chooseConfiguredVoice(voices: TtsReaderVoice[]): TtsReaderVoice | undefined {
@@ -362,18 +381,41 @@ export default class TtsReaderPlugin extends Plugin {
 
   private async playRemoteAudio(url: string): Promise<void> {
     this.stopPlayback();
+    const cacheKey = `remote:${url}`;
+    const cachedAudio = getBoundedCacheEntry(this.audioCache, cacheKey);
+    if (cachedAudio) {
+      await this.playAudioBytes(cachedAudio.bytes, cachedAudio.contentType);
+      return;
+    }
+
     const response = await makeObsidianFetch(requestUrl)(url);
     if (!response.ok) {
+      this.showPlaybackError(`Voice sample request failed: ${response.status} ${response.statusText}`);
       throw new Error(`Voice sample request failed: ${response.status} ${response.statusText}`);
     }
-    const blob = new Blob([await response.arrayBuffer()], {
-      type: response.headers.get("content-type") ?? "audio/mpeg",
-    });
+    const audio = {
+      bytes: new Uint8Array(await response.arrayBuffer()),
+      contentType: response.headers.get("content-type") ?? "audio/mpeg",
+    };
+    putBoundedCacheEntry(this.audioCache, cacheKey, audio, AUDIO_CACHE_LIMIT);
+    await this.playAudioBytes(audio.bytes, audio.contentType);
+  }
+
+  private async playAudioBytes(bytes: Uint8Array, contentType: string): Promise<void> {
+    const audioBuffer = bytes.buffer.slice(
+      bytes.byteOffset,
+      bytes.byteOffset + bytes.byteLength,
+    ) as ArrayBuffer;
+    const blob = new Blob([audioBuffer], { type: contentType });
     this.currentObjectUrl = URL.createObjectURL(blob);
     this.currentAudio = new Audio(this.currentObjectUrl);
     this.bindAudioStatus(this.currentAudio);
     await this.currentAudio.play();
     this.startAudioStatus(this.currentAudio);
+  }
+
+  showPlaybackError(message: string): void {
+    this.finishPlaybackStatus("Error", message);
   }
 }
 
@@ -386,6 +428,11 @@ function formatTime(seconds: number): string {
   const minutes = Math.floor(safeSeconds / 60);
   const remainder = safeSeconds % 60;
   return `${minutes}:${remainder.toString().padStart(2, "0")}`;
+}
+
+function shortenStatusDetail(detail: string): string {
+  const normalized = detail.replace(/\s+/g, " ").trim();
+  return normalized.length > 34 ? `${normalized.slice(0, 31)}...` : normalized;
 }
 
 class TtsReaderModal extends Modal {

@@ -23,7 +23,7 @@ This project contains an Obsidian desktop plugin plus a small TypeScript SDK for
 2. Create this folder in your vault:
 
    ```text
-   <your vault>/.obsidian/plugins/obsidian-ttsreader/
+   <your vault>/.obsidian/plugins/ttsreader/
    ```
 
 3. Put the three files into that folder.
@@ -39,9 +39,9 @@ npm run build
 Then copy these files into your vault plugin folder:
 
 ```text
-dist/main.js -> <your vault>/.obsidian/plugins/obsidian-ttsreader/main.js
-manifest.json -> <your vault>/.obsidian/plugins/obsidian-ttsreader/manifest.json
-styles.css -> <your vault>/.obsidian/plugins/obsidian-ttsreader/styles.css
+dist/main.js -> <your vault>/.obsidian/plugins/ttsreader/main.js
+manifest.json -> <your vault>/.obsidian/plugins/ttsreader/manifest.json
+styles.css -> <your vault>/.obsidian/plugins/ttsreader/styles.css
 ```
 
 ## Usage

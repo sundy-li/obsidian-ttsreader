@@ -72,8 +72,7 @@
   border-radius: 6px;
   display: inline-flex;
   gap: 6px;
-  max-width: 260px;
-  min-width: 132px;
+  max-width: 178px;
   padding: 0 6px;
 }
 
@@ -86,10 +85,19 @@
   opacity: 0.75;
 }
 
+.ttsreader-plugin-statusbar-error {
+  color: var(--text-error);
+  opacity: 1;
+}
+
 .ttsreader-plugin-statusbar-icon {
   color: var(--interactive-accent);
   font-size: 13px;
   line-height: 1;
+}
+
+.ttsreader-plugin-statusbar-error .ttsreader-plugin-statusbar-icon {
+  color: var(--text-error);
 }
 
 .ttsreader-plugin-statusbar-label {
@@ -98,24 +106,11 @@
   white-space: nowrap;
 }
 
-.ttsreader-plugin-statusbar-meter {
-  background: var(--background-modifier-border);
-  border-radius: 999px;
-  flex: 1 1 46px;
-  height: 3px;
-  min-width: 34px;
-  overflow: hidden;
-}
-
-.ttsreader-plugin-statusbar-progress {
-  background: var(--interactive-accent);
-  display: block;
-  height: 100%;
-  transition: width 180ms linear;
-  width: 0%;
-}
-
 .ttsreader-plugin-statusbar-time {
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+  max-width: 76px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

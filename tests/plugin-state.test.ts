@@ -3,9 +3,13 @@ import { describe, it } from "node:test";
 
 import {
   DEFAULT_SETTINGS,
+  AUDIO_CACHE_LIMIT,
+  buildAudioCacheKey,
   chooseInitialVoiceId,
   filterVoicesForSelection,
+  fingerprintCredential,
   formatPremiumUsage,
+  getBoundedCacheEntry,
   getCredentialKind,
   getCredentialParts,
   getVoiceDemoUrl,
@@ -13,6 +17,7 @@ import {
   getReadableText,
   groupVoicesByLanguage,
   mergeSettings,
+  putBoundedCacheEntry,
   resolveServerCustomTextMode,
   shouldCountPremiumUsage,
 } from "../src/plugin-state.js";
@@ -135,6 +140,46 @@ describe("plugin state helpers", () => {
       kind: "cloud-bearer",
       cloudBearerToken: "cloud-token",
     });
+  });
+
+  it("builds stable audio cache keys with authorization fingerprints", () => {
+    const key = buildAudioCacheKey({
+      text: "  Hello  ",
+      voiceId: "voice-a",
+      lang: "en-US",
+      rate: 1,
+      mode: "cloud-playback",
+      isTest: false,
+      credentialKind: "cloud-bearer",
+      credentialFingerprint: fingerprintCredential("secret-token"),
+    });
+
+    assert.equal(key, buildAudioCacheKey({
+      text: "Hello",
+      voiceId: "voice-a",
+      lang: "en-US",
+      rate: 1,
+      mode: "cloud-playback",
+      isTest: false,
+      credentialKind: "cloud-bearer",
+      credentialFingerprint: fingerprintCredential("secret-token"),
+    }));
+    assert.notEqual(fingerprintCredential("secret-token"), fingerprintCredential("other-token"));
+  });
+
+  it("keeps only the most recent audio cache entries and refreshes hits", () => {
+    const cache = new Map<string, number>();
+    for (let index = 0; index < AUDIO_CACHE_LIMIT; index += 1) {
+      putBoundedCacheEntry(cache, `key-${index}`, index);
+    }
+
+    assert.equal(getBoundedCacheEntry(cache, "key-0"), 0);
+    putBoundedCacheEntry(cache, "key-new", 99);
+
+    assert.equal(cache.size, AUDIO_CACHE_LIMIT);
+    assert.equal(cache.has("key-1"), false);
+    assert.equal(cache.has("key-0"), true);
+    assert.equal(cache.has("key-new"), true);
   });
 
   it("builds absolute demo audio URLs for voice sample playback", () => {
