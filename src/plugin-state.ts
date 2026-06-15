@@ -1,12 +1,12 @@
 import type { TtsReaderVoice } from "./sdk.js";
 
 export type VoiceFilter = "all" | "premium" | "basic";
-export type AuthMode = "uapi-key" | "cloud-bearer";
+export type CredentialKind = "none" | "uapi-key" | "cloud-bearer";
 
 export interface TtsReaderPluginSettings {
   apiKey: string;
   cloudBearerToken: string;
-  authMode: AuthMode;
+  credential: string;
   preferredVoiceId: string;
   preferredMode: "cloud-playback" | "uapi-export";
   defaultRate: number;
@@ -19,7 +19,7 @@ export interface TtsReaderPluginSettings {
 export const DEFAULT_SETTINGS: TtsReaderPluginSettings = {
   apiKey: "",
   cloudBearerToken: "",
-  authMode: "uapi-key",
+  credential: "",
   preferredVoiceId: "",
   preferredMode: "cloud-playback",
   defaultRate: 1,
@@ -51,9 +51,11 @@ export interface VoiceSelectionFilter {
 }
 
 export function mergeSettings(settings: Partial<TtsReaderPluginSettings> | null | undefined): TtsReaderPluginSettings {
+  const credential = settings?.credential ?? settings?.apiKey ?? settings?.cloudBearerToken ?? "";
   return {
     ...DEFAULT_SETTINGS,
     ...(settings ?? {}),
+    credential,
   };
 }
 
@@ -156,9 +158,9 @@ export function getPremiumUsageAfterRead(
 export function shouldCountPremiumUsage(
   isPremiumVoice: boolean,
   mode: TtsReaderPluginSettings["preferredMode"],
-  authMode: AuthMode = "uapi-key",
+  credentialKind: CredentialKind = "none",
 ): boolean {
-  return isPremiumVoice && (mode === "uapi-export" || authMode === "cloud-bearer");
+  return isPremiumVoice && (mode === "uapi-export" || credentialKind === "cloud-bearer");
 }
 
 export function resolveServerCustomTextMode(
@@ -174,6 +176,44 @@ export function resolveServerCustomTextMode(
   }
 
   return "";
+}
+
+export function normalizeCredential(value: string): string {
+  return value.trim();
+}
+
+export function normalizeUapiKey(value: string): string {
+  return normalizeCredential(value).replace(/^Bearer\s+/i, "").replace(/^UAPI-/i, "");
+}
+
+export function normalizeBearerToken(value: string): string {
+  return normalizeCredential(value).replace(/^Bearer\s+/i, "");
+}
+
+export function getCredentialKind(value: string): CredentialKind {
+  const credential = normalizeCredential(value);
+  if (!credential) {
+    return "none";
+  }
+  if (normalizeBearerToken(credential).startsWith("UAPI-")) {
+    return "uapi-key";
+  }
+  return "cloud-bearer";
+}
+
+export function getCredentialParts(value: string): {
+  kind: CredentialKind;
+  apiKey?: string;
+  cloudBearerToken?: string;
+} {
+  const kind = getCredentialKind(value);
+  if (kind === "uapi-key") {
+    return { kind, apiKey: normalizeUapiKey(value) };
+  }
+  if (kind === "cloud-bearer") {
+    return { kind, cloudBearerToken: normalizeBearerToken(value) };
+  }
+  return { kind };
 }
 
 export function getVoiceDemoUrl(voice: TtsReaderVoice): string {

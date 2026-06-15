@@ -6,6 +6,8 @@ import {
   chooseInitialVoiceId,
   filterVoicesForSelection,
   formatPremiumUsage,
+  getCredentialKind,
+  getCredentialParts,
   getVoiceDemoUrl,
   getPremiumUsageAfterRead,
   getReadableText,
@@ -21,6 +23,12 @@ describe("plugin state helpers", () => {
       mergeSettings({ defaultRate: 1.25, preferredVoiceId: "voice-a" }),
       { ...DEFAULT_SETTINGS, defaultRate: 1.25, preferredVoiceId: "voice-a" },
     );
+  });
+
+  it("migrates old authorization fields into the unified credential", () => {
+    assert.equal(mergeSettings({ apiKey: "abc123" }).credential, "abc123");
+    assert.equal(mergeSettings({ cloudBearerToken: "token.jwt" }).credential, "token.jwt");
+    assert.equal(mergeSettings({ credential: "UAPI-live" }).credential, "UAPI-live");
   });
 
   it("chooses the preferred voice only when it exists", () => {
@@ -115,6 +123,18 @@ describe("plugin state helpers", () => {
     assert.equal(resolveServerCustomTextMode("uapi-export", false), "uapi-export");
     assert.equal(resolveServerCustomTextMode("cloud-playback", false, true), "cloud-playback");
     assert.equal(resolveServerCustomTextMode("uapi-export", true, true), "cloud-playback");
+  });
+
+  it("detects the authorization credential type from one input", () => {
+    assert.equal(getCredentialKind(""), "none");
+    assert.equal(getCredentialKind("UAPI-abc123"), "uapi-key");
+    assert.equal(getCredentialKind("Bearer UAPI-abc123"), "uapi-key");
+    assert.equal(getCredentialKind("Bearer eyJhbGciOiJSUzI1NiJ9.payload.signature"), "cloud-bearer");
+    assert.deepEqual(getCredentialParts("UAPI-abc123"), { kind: "uapi-key", apiKey: "abc123" });
+    assert.deepEqual(getCredentialParts("Bearer cloud-token"), {
+      kind: "cloud-bearer",
+      cloudBearerToken: "cloud-token",
+    });
   });
 
   it("builds absolute demo audio URLs for voice sample playback", () => {
