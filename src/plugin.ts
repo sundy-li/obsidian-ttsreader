@@ -23,11 +23,19 @@ import {
 } from "./plugin-state.js";
 
 const TTSREADER_SIGN_IN_URL = "https://ttsreader.com/player/";
+const ESTIMATED_SPEECH_CHARS_PER_SECOND = 13;
 
 export default class TtsReaderPlugin extends Plugin {
   settings: TtsReaderPluginSettings = DEFAULT_SETTINGS;
   private currentAudio: HTMLAudioElement | null = null;
   private currentObjectUrl: string | null = null;
+  private statusBarEl!: HTMLElement;
+  private statusLabelEl!: HTMLElement;
+  private statusTimeEl!: HTMLElement;
+  private statusProgressEl!: HTMLElement;
+  private statusTimer: number | null = null;
+  private browserSpeechStartedAt = 0;
+  private browserSpeechEstimatedDuration = 0;
 
   async onload(): Promise<void> {
     this.settings = mergeSettings(await this.loadData());
@@ -35,6 +43,7 @@ export default class TtsReaderPlugin extends Plugin {
     this.addRibbonIcon("volume-2", "TTSReader", () => {
       this.openReader();
     });
+    this.createPlaybackStatusBar();
 
     this.addCommand({
       id: "open-ttsreader",
@@ -218,7 +227,9 @@ export default class TtsReaderPlugin extends Plugin {
     const blob = new Blob([audioBuffer], { type: audio.contentType });
     this.currentObjectUrl = URL.createObjectURL(blob);
     this.currentAudio = new Audio(this.currentObjectUrl);
+    this.bindAudioStatus(this.currentAudio);
     await this.currentAudio.play();
+    this.startAudioStatus(this.currentAudio);
   }
 
   stopPlayback(): void {
@@ -232,6 +243,7 @@ export default class TtsReaderPlugin extends Plugin {
       URL.revokeObjectURL(this.currentObjectUrl);
       this.currentObjectUrl = null;
     }
+    this.finishPlaybackStatus("Stopped");
   }
 
   private speakWithBrowserVoice(text: string, voiceId: string, rate: number): void {
@@ -242,7 +254,96 @@ export default class TtsReaderPlugin extends Plugin {
       utterance.lang = voice.lang;
     }
     utterance.rate = Math.min(2, Math.max(0.5, rate));
+    utterance.onstart = () => this.startBrowserSpeechStatus(text, utterance.rate);
+    utterance.onboundary = (event) => this.updateBrowserSpeechStatus(text, event.charIndex);
+    utterance.onend = () => this.finishPlaybackStatus("Done");
+    utterance.onerror = () => this.finishPlaybackStatus("Stopped");
     speechSynthesis.speak(utterance);
+  }
+
+  private createPlaybackStatusBar(): void {
+    this.statusBarEl = this.addStatusBarItem();
+    this.statusBarEl.addClass("ttsreader-plugin-statusbar");
+    this.statusBarEl.addClass("ttsreader-plugin-statusbar-idle");
+    this.statusBarEl.setAttribute("aria-label", "TTSReader playback status");
+
+    this.statusBarEl.createSpan({ cls: "ttsreader-plugin-statusbar-icon", text: "♫" });
+    this.statusLabelEl = this.statusBarEl.createSpan({ cls: "ttsreader-plugin-statusbar-label", text: "TTSReader" });
+    const meter = this.statusBarEl.createSpan({ cls: "ttsreader-plugin-statusbar-meter" });
+    this.statusProgressEl = meter.createSpan({ cls: "ttsreader-plugin-statusbar-progress" });
+    this.statusTimeEl = this.statusBarEl.createSpan({ cls: "ttsreader-plugin-statusbar-time", text: "--:--" });
+  }
+
+  private bindAudioStatus(audio: HTMLAudioElement): void {
+    audio.addEventListener("loadedmetadata", () => this.updateAudioStatus(audio));
+    audio.addEventListener("timeupdate", () => this.updateAudioStatus(audio));
+    audio.addEventListener("ended", () => this.finishPlaybackStatus("Done"));
+    audio.addEventListener("pause", () => {
+      if (!audio.ended) {
+        this.updatePlaybackStatus("Paused", audio.currentTime, getFiniteDuration(audio.duration));
+      }
+    });
+    audio.addEventListener("play", () => this.startAudioStatus(audio));
+  }
+
+  private startAudioStatus(audio: HTMLAudioElement): void {
+    this.updatePlaybackStatus("Playing", audio.currentTime, getFiniteDuration(audio.duration));
+  }
+
+  private updateAudioStatus(audio: HTMLAudioElement): void {
+    this.updatePlaybackStatus("Playing", audio.currentTime, getFiniteDuration(audio.duration));
+  }
+
+  private startBrowserSpeechStatus(text: string, rate: number): void {
+    this.browserSpeechStartedAt = Date.now();
+    this.browserSpeechEstimatedDuration = Math.max(1, text.length / (ESTIMATED_SPEECH_CHARS_PER_SECOND * rate));
+    this.updatePlaybackStatus("Speaking", 0, this.browserSpeechEstimatedDuration);
+    this.restartBrowserStatusTimer();
+  }
+
+  private updateBrowserSpeechStatus(text: string, charIndex: number): void {
+    const progress = Math.max(0, Math.min(1, charIndex / Math.max(1, text.length)));
+    this.updatePlaybackStatus("Speaking", progress * this.browserSpeechEstimatedDuration, this.browserSpeechEstimatedDuration);
+  }
+
+  private restartBrowserStatusTimer(): void {
+    if (this.statusTimer !== null) {
+      window.clearInterval(this.statusTimer);
+    }
+    this.statusTimer = window.setInterval(() => {
+      const elapsed = (Date.now() - this.browserSpeechStartedAt) / 1000;
+      this.updatePlaybackStatus("Speaking", elapsed, this.browserSpeechEstimatedDuration);
+      if (elapsed >= this.browserSpeechEstimatedDuration) {
+        this.finishPlaybackStatus("Done");
+      }
+    }, 500);
+  }
+
+  private updatePlaybackStatus(label: string, currentSeconds: number, totalSeconds: number): void {
+    const duration = getFiniteDuration(totalSeconds);
+    const current = Math.max(0, Math.min(currentSeconds, duration || currentSeconds));
+    const progress = duration > 0 ? Math.max(0, Math.min(100, (current / duration) * 100)) : 0;
+
+    this.statusBarEl.removeClass("ttsreader-plugin-statusbar-idle");
+    this.statusBarEl.addClass("ttsreader-plugin-statusbar-active");
+    this.statusLabelEl.setText(label);
+    this.statusTimeEl.setText(duration > 0 ? `${formatTime(current)} / ${formatTime(duration)}` : formatTime(current));
+    this.statusProgressEl.style.width = `${progress}%`;
+  }
+
+  private finishPlaybackStatus(label: string): void {
+    if (this.statusTimer !== null) {
+      window.clearInterval(this.statusTimer);
+      this.statusTimer = null;
+    }
+    if (!this.statusBarEl) {
+      return;
+    }
+    this.statusBarEl.removeClass("ttsreader-plugin-statusbar-active");
+    this.statusBarEl.addClass("ttsreader-plugin-statusbar-idle");
+    this.statusLabelEl.setText(label);
+    this.statusTimeEl.setText("--:--");
+    this.statusProgressEl.style.width = "0%";
   }
 
   private chooseConfiguredVoice(voices: TtsReaderVoice[]): TtsReaderVoice | undefined {
@@ -270,8 +371,21 @@ export default class TtsReaderPlugin extends Plugin {
     });
     this.currentObjectUrl = URL.createObjectURL(blob);
     this.currentAudio = new Audio(this.currentObjectUrl);
+    this.bindAudioStatus(this.currentAudio);
     await this.currentAudio.play();
+    this.startAudioStatus(this.currentAudio);
   }
+}
+
+function getFiniteDuration(duration: number): number {
+  return Number.isFinite(duration) && duration > 0 ? duration : 0;
+}
+
+function formatTime(seconds: number): string {
+  const safeSeconds = Math.max(0, Math.floor(seconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainder = safeSeconds % 60;
+  return `${minutes}:${remainder.toString().padStart(2, "0")}`;
 }
 
 class TtsReaderModal extends Modal {
