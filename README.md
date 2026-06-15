@@ -27,7 +27,7 @@ This project contains an Obsidian desktop plugin plus a small TypeScript SDK for
    ```
 
 3. Put the three files into that folder.
-4. Restart Obsidian and enable `Obsidian TTSReader` in Community plugins.
+4. Restart Obsidian and enable `TTSReader` in Community plugins.
 
 ### From source
 
