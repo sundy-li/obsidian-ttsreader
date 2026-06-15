@@ -11,6 +11,7 @@ import {
   getReadableText,
   groupVoicesByLanguage,
   mergeSettings,
+  resolveServerCustomTextMode,
   shouldCountPremiumUsage,
 } from "../src/plugin-state.js";
 
@@ -105,6 +106,12 @@ describe("plugin state helpers", () => {
     assert.equal(shouldCountPremiumUsage(true, "uapi-export"), true);
     assert.equal(shouldCountPremiumUsage(true, "cloud-playback"), false);
     assert.equal(shouldCountPremiumUsage(false, "uapi-export"), false);
+  });
+
+  it("requires UAPI export for custom text with TTSReader server voices", () => {
+    assert.equal(resolveServerCustomTextMode("cloud-playback", false), "");
+    assert.equal(resolveServerCustomTextMode("cloud-playback", true), "uapi-export");
+    assert.equal(resolveServerCustomTextMode("uapi-export", false), "uapi-export");
   });
 
   it("builds absolute demo audio URLs for voice sample playback", () => {

@@ -152,6 +152,17 @@ export function shouldCountPremiumUsage(isPremiumVoice: boolean, mode: TtsReader
   return isPremiumVoice && mode === "uapi-export";
 }
 
+export function resolveServerCustomTextMode(
+  mode: TtsReaderPluginSettings["preferredMode"],
+  hasApiKey: boolean,
+): TtsReaderPluginSettings["preferredMode"] | "" {
+  if (mode === "uapi-export" || hasApiKey) {
+    return "uapi-export";
+  }
+
+  return "";
+}
+
 export function getVoiceDemoUrl(voice: TtsReaderVoice): string {
   if (!voice.demo) {
     return "";

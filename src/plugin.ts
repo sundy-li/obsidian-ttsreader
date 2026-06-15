@@ -15,6 +15,7 @@ import {
   getVoiceDemoUrl,
   groupVoicesByLanguage,
   mergeSettings,
+  resolveServerCustomTextMode,
   shouldCountPremiumUsage,
   type VoiceLanguageGroup,
 } from "./plugin-state.js";
@@ -163,17 +164,18 @@ export default class TtsReaderPlugin extends Plugin {
     }
 
     const voice = getServerAndBrowserVoices().find((candidate) => candidate.id === voiceId);
-    if (mode === "cloud-playback") {
-      await this.speakWithBrowserFallback(trimmed, voice?.lang, rate);
-      new Notice("TTSReader: server voices need UAPI export for custom text. Using a browser voice for this text.");
-      return;
-    }
-
     if (!voice) {
       throw new Error(`TTSReader voice not found: ${voiceId}`);
     }
 
-    await this.speakWithServerVoice(trimmed, voice, rate, mode, false);
+    const serverMode = resolveServerCustomTextMode(mode, Boolean(this.settings.apiKey));
+    if (!serverMode) {
+      throw new Error(
+        "Selected TTSReader voices can preview samples, but custom text requires a UAPI key. Add a UAPI key in settings or choose a browser voice.",
+      );
+    }
+
+    await this.speakWithServerVoice(trimmed, voice, rate, serverMode, false);
   }
 
   private async speakWithServerVoice(
@@ -206,19 +208,6 @@ export default class TtsReaderPlugin extends Plugin {
     this.currentObjectUrl = URL.createObjectURL(blob);
     this.currentAudio = new Audio(this.currentObjectUrl);
     await this.currentAudio.play();
-  }
-
-  private async speakWithBrowserFallback(text: string, lang: string | undefined, rate: number): Promise<void> {
-    const browserVoices = await waitForBrowserVoices();
-    const fallback =
-      findBrowserVoice(browserVoices, lang) ??
-      browserVoices[0];
-
-    if (!fallback) {
-      throw new Error("TTSReader server voice playback requires UAPI export for custom text.");
-    }
-
-    this.speakWithBrowserVoice(text, fallback.voiceURI, rate);
   }
 
   stopPlayback(): void {
@@ -588,20 +577,6 @@ async function waitForVoices(): Promise<TtsReaderVoice[]> {
 function getServerAndBrowserVoices(browserVoices?: SpeechSynthesisVoice[]): TtsReaderVoice[] {
   const client = new TtsReaderClient();
   return client.listVoices(browserVoices);
-}
-
-function findBrowserVoice(voices: SpeechSynthesisVoice[], lang: string | undefined): SpeechSynthesisVoice | undefined {
-  if (!lang) {
-    return voices[0];
-  }
-
-  const normalizedLang = lang.toLowerCase();
-  const languageCode = normalizedLang.split("-")[0];
-  return (
-    voices.find((voice) => voice.lang.toLowerCase() === normalizedLang) ??
-    voices.find((voice) => voice.lang.toLowerCase().split("-")[0] === languageCode) ??
-    voices[0]
-  );
 }
 
 async function waitForBrowserVoices(): Promise<SpeechSynthesisVoice[]> {
