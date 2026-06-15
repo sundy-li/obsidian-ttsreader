@@ -5,6 +5,7 @@ import { makeObsidianFetch } from "./obsidian-fetch.js";
 import {
   DEFAULT_SETTINGS,
   PREMIUM_CHAR_LIMIT,
+  type AuthMode,
   type VoiceFilter,
   type TtsReaderPluginSettings,
   chooseInitialVoiceId,
@@ -52,6 +53,7 @@ export default class TtsReaderPlugin extends Plugin {
     this.addCommand({
       id: "read-selected-text",
       name: "Read the selected text",
+      hotkeys: [{ modifiers: ["Mod", "Shift"], key: "R" }],
       editorCallback: (editor) => {
         this.readSelectedText(editor.getSelection());
       },
@@ -116,7 +118,7 @@ export default class TtsReaderPlugin extends Plugin {
       return;
     }
 
-    if (shouldCountPremiumUsage(voice.isPremium, this.settings.preferredMode)) {
+    if (shouldCountPremiumUsage(voice.isPremium, this.settings.preferredMode, this.settings.authMode)) {
       const usage = getPremiumUsageAfterRead(this.settings.premiumCharsUsed, text);
       if (usage.exceeded) {
         new Notice(`TTSReader: premium voice limit exceeded: ${usage.used.toLocaleString()} / ${PREMIUM_CHAR_LIMIT.toLocaleString()} chars.`);
@@ -126,7 +128,7 @@ export default class TtsReaderPlugin extends Plugin {
 
     await this.speak(text, voice.id, this.settings.defaultRate, this.settings.preferredMode);
 
-    if (shouldCountPremiumUsage(voice.isPremium, this.settings.preferredMode)) {
+    if (shouldCountPremiumUsage(voice.isPremium, this.settings.preferredMode, this.settings.authMode)) {
       this.settings.premiumCharsUsed = getPremiumUsageAfterRead(this.settings.premiumCharsUsed, text).used;
       await this.saveSettings();
     }
@@ -146,7 +148,7 @@ export default class TtsReaderPlugin extends Plugin {
       return;
     }
 
-    await this.speakWithServerVoice(sampleText, voice, rate, mode, true);
+    await this.speakWithServerVoice(sampleText, voice, rate, "cloud-playback", true);
   }
 
   async speak(text: string, voiceId: string, rate: number, mode: TtsReaderPluginSettings["preferredMode"]): Promise<void> {
@@ -168,10 +170,12 @@ export default class TtsReaderPlugin extends Plugin {
       throw new Error(`TTSReader voice not found: ${voiceId}`);
     }
 
-    const serverMode = resolveServerCustomTextMode(mode, Boolean(this.settings.apiKey));
+    const hasCloudBearerToken = this.settings.authMode === "cloud-bearer" && Boolean(this.settings.cloudBearerToken);
+    const hasApiKey = this.settings.authMode === "uapi-key" && Boolean(this.settings.apiKey);
+    const serverMode = resolveServerCustomTextMode(mode, hasApiKey, hasCloudBearerToken);
     if (!serverMode) {
       throw new Error(
-        "Selected TTSReader voices can preview samples, but custom text requires a UAPI key. Add a UAPI key in settings or choose a browser voice.",
+        "Selected TTSReader voices can preview samples, but custom text requires a UAPI key or Cloud Bearer token. Add authorization in settings or choose a browser voice.",
       );
     }
 
@@ -187,7 +191,9 @@ export default class TtsReaderPlugin extends Plugin {
   ): Promise<void> {
     this.stopPlayback();
     const client = new TtsReaderClient({
-      apiKey: this.settings.apiKey || undefined,
+      apiKey: this.settings.authMode === "uapi-key" ? this.settings.apiKey || undefined : undefined,
+      cloudBearerToken:
+        this.settings.authMode === "cloud-bearer" ? this.settings.cloudBearerToken || undefined : undefined,
       fetch: makeObsidianFetch(requestUrl),
     });
     const audio = await client.synthesize({
@@ -309,6 +315,27 @@ class TtsReaderModal extends Modal {
       await this.plugin.saveSettings();
     });
 
+    const authModeRow = wrapper.createDiv({ cls: "ttsreader-plugin-row" });
+    authModeRow.createEl("label", { text: "Authorization" });
+    const authModeSelect = authModeRow.createEl("select");
+    authModeSelect.createEl("option", { value: "uapi-key", text: "UAPI key" });
+    authModeSelect.createEl("option", { value: "cloud-bearer", text: "Cloud Bearer token" });
+    authModeSelect.value = this.plugin.settings.authMode;
+    authModeSelect.addEventListener("change", async () => {
+      this.plugin.settings.authMode = authModeSelect.value as AuthMode;
+      await this.plugin.saveSettings();
+    });
+
+    const bearerRow = wrapper.createDiv({ cls: "ttsreader-plugin-row" });
+    bearerRow.createEl("label", { text: "Bearer Token" });
+    const bearerInput = bearerRow.createEl("input", { type: "password" });
+    bearerInput.placeholder = "Bearer eyJ...";
+    bearerInput.value = this.plugin.settings.cloudBearerToken;
+    bearerInput.addEventListener("change", async () => {
+      this.plugin.settings.cloudBearerToken = normalizeBearerToken(bearerInput.value);
+      await this.plugin.saveSettings();
+    });
+
     const languageRow = wrapper.createDiv({ cls: "ttsreader-plugin-row" });
     languageRow.createEl("label", { text: "Reading Language" });
     this.languageSelect = languageRow.createEl("select");
@@ -407,7 +434,7 @@ class TtsReaderModal extends Modal {
       const mode = this.modeSelect.value as TtsReaderPluginSettings["preferredMode"];
       const rate = Number(this.rateInput.value) || 1;
       const voice = this.voices.find((candidate) => candidate.id === voiceId);
-      const countPremiumUsage = shouldCountPremiumUsage(Boolean(voice?.isPremium), mode);
+      const countPremiumUsage = shouldCountPremiumUsage(Boolean(voice?.isPremium), mode, this.plugin.settings.authMode);
       if (countPremiumUsage) {
         const usage = getPremiumUsageAfterRead(this.plugin.settings.premiumCharsUsed, this.textArea.value);
         if (usage.exceeded) {
@@ -543,6 +570,35 @@ class TtsReaderSettingTab extends PluginSettingTab {
             this.plugin.settings.apiKey = normalizeUapiKey(value);
             await this.plugin.saveSettings();
           });
+      });
+
+    new Setting(containerEl)
+      .setName("Authorization mode")
+      .setDesc("Choose how custom TTSReader server voice requests are authorized.")
+      .addDropdown((dropdown) => {
+        dropdown
+          .addOption("uapi-key", "UAPI key")
+          .addOption("cloud-bearer", "Cloud Bearer token")
+          .setValue(this.plugin.settings.authMode)
+          .onChange(async (value) => {
+            this.plugin.settings.authMode = value as AuthMode;
+            await this.plugin.saveSettings();
+            this.display();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Cloud Bearer token")
+      .setDesc("Paste the Authorization Bearer token from the TTSReader cloud request. This is not a Cookie and can expire.")
+      .addText((text) => {
+        text
+          .setPlaceholder("Bearer eyJ...")
+          .setValue(this.plugin.settings.cloudBearerToken)
+          .onChange(async (value) => {
+            this.plugin.settings.cloudBearerToken = normalizeBearerToken(value);
+            await this.plugin.saveSettings();
+          });
+        text.inputEl.type = "password";
       });
 
     this.voices = await waitForVoices();
@@ -698,6 +754,10 @@ class TtsReaderSettingTab extends PluginSettingTab {
 
 function normalizeUapiKey(value: string): string {
   return value.trim().replace(/^Bearer\s+/i, "").replace(/^UAPI-/i, "");
+}
+
+function normalizeBearerToken(value: string): string {
+  return value.trim().replace(/^Bearer\s+/i, "");
 }
 
 async function waitForVoices(): Promise<TtsReaderVoice[]> {

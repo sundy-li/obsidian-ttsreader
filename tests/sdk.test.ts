@@ -122,6 +122,49 @@ describe("TTSReader SDK", () => {
     assert.equal(JSON.parse(String(calls[0].init.body)).isTest, false);
   });
 
+  it("adds the cloud playback bearer token when provided", async () => {
+    const calls: Array<{ init: RequestInit }> = [];
+    const fetcher: typeof fetch = async (_url, init) => {
+      calls.push({ init: init ?? {} });
+      return new Response(new Uint8Array([1]), {
+        status: 200,
+        headers: { "content-type": "audio/mpeg" },
+      });
+    };
+    const client = new TtsReaderClient({ cloudBearerToken: "Bearer cloud-token", fetch: fetcher });
+
+    await client.synthesize({
+      text: "Hello",
+      voiceId: "ttsreaderServer.azure.en-US-DavisMultilingualNeural",
+      lang: "en-US",
+      mode: "cloud-playback",
+    });
+
+    assert.equal(new Headers(calls[0].init.headers).get("authorization"), "Bearer cloud-token");
+    assert.equal(JSON.parse(String(calls[0].init.body)).isTest, false);
+  });
+
+  it("does not send a cloud bearer token to the UAPI endpoint", async () => {
+    const calls: Array<{ init: RequestInit }> = [];
+    const fetcher: typeof fetch = async (_url, init) => {
+      calls.push({ init: init ?? {} });
+      return new Response(new Uint8Array([1]), {
+        status: 200,
+        headers: { "content-type": "audio/mpeg" },
+      });
+    };
+    const client = new TtsReaderClient({ apiKey: "abc123", cloudBearerToken: "cloud-token", fetch: fetcher });
+
+    await client.synthesize({
+      text: "Hello",
+      voiceId: "Nova Premium",
+      lang: "en-US",
+      mode: "uapi-export",
+    });
+
+    assert.equal(new Headers(calls[0].init.headers).get("authorization"), "Bearer UAPI-abc123");
+  });
+
   it("builds the official UAPI export request when an API key is provided", async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const fetcher: typeof fetch = async (url, init) => {

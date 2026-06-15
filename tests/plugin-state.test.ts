@@ -105,6 +105,7 @@ describe("plugin state helpers", () => {
   it("counts premium usage only when authenticated export can read custom server text", () => {
     assert.equal(shouldCountPremiumUsage(true, "uapi-export"), true);
     assert.equal(shouldCountPremiumUsage(true, "cloud-playback"), false);
+    assert.equal(shouldCountPremiumUsage(true, "cloud-playback", "cloud-bearer"), true);
     assert.equal(shouldCountPremiumUsage(false, "uapi-export"), false);
   });
 
@@ -112,6 +113,8 @@ describe("plugin state helpers", () => {
     assert.equal(resolveServerCustomTextMode("cloud-playback", false), "");
     assert.equal(resolveServerCustomTextMode("cloud-playback", true), "uapi-export");
     assert.equal(resolveServerCustomTextMode("uapi-export", false), "uapi-export");
+    assert.equal(resolveServerCustomTextMode("cloud-playback", false, true), "cloud-playback");
+    assert.equal(resolveServerCustomTextMode("uapi-export", true, true), "cloud-playback");
   });
 
   it("builds absolute demo audio URLs for voice sample playback", () => {

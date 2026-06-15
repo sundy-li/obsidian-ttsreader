@@ -53,7 +53,12 @@ styles.css -> <your vault>/.obsidian/plugins/obsidian-ttsreader/styles.css
 
 ## Premium voices and sign-in
 
-The plugin can open the TTSReader sign-in page from settings, but Obsidian cannot read Google/Apple login cookies from your external browser session. For authenticated export mode, paste your official TTSReader UAPI key into plugin settings and choose `UAPI export`.
+The plugin can open the TTSReader sign-in page from settings, but Obsidian cannot read Google/Apple login cookies from your external browser session.
+
+For authenticated server voices, choose one authorization mode in plugin settings:
+
+- `UAPI key`: Paste your official TTSReader UAPI key and use `UAPI export`.
+- `Cloud Bearer token`: Paste the `Authorization: Bearer ...` token from a logged-in TTSReader cloud request. This is not a Cookie, can expire, and should be treated like a password.
 
 Cloud playback mirrors the website test/playback path and tracks premium usage locally against the 5,000 character limit shown in the UI.
 

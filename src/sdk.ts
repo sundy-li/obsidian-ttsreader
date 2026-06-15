@@ -21,6 +21,7 @@ export interface TtsReaderAudio {
 
 export interface TtsReaderClientOptions {
   apiKey?: string;
+  cloudBearerToken?: string;
   fetch?: typeof fetch;
   cloudPlaybackEndpoint?: string;
   uapiEndpoint?: string;
@@ -82,14 +83,20 @@ function normalizeApiKey(apiKey: string): string {
   return apiKey.startsWith("UAPI-") ? apiKey : `UAPI-${apiKey}`;
 }
 
+function normalizeBearerToken(token: string): string {
+  return token.trim().replace(/^Bearer\s+/i, "");
+}
+
 export class TtsReaderClient {
   private readonly apiKey?: string;
+  private readonly cloudBearerToken: string;
   private readonly fetcher: typeof fetch;
   private readonly cloudPlaybackEndpoint: string;
   private readonly uapiEndpoint: string;
 
   constructor(options: TtsReaderClientOptions = {}) {
     this.apiKey = options.apiKey;
+    this.cloudBearerToken = normalizeBearerToken(options.cloudBearerToken ?? "");
     this.fetcher = options.fetch ?? fetch.bind(globalThis);
     this.cloudPlaybackEndpoint = options.cloudPlaybackEndpoint ?? DEFAULT_CLOUD_PLAYBACK_ENDPOINT;
     this.uapiEndpoint = options.uapiEndpoint ?? DEFAULT_UAPI_ENDPOINT;
@@ -114,7 +121,10 @@ export class TtsReaderClient {
   private async synthesizeWithCloudPlayback(options: SynthesizeOptions): Promise<TtsReaderAudio> {
     const response = await this.fetcher(this.cloudPlaybackEndpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        ...(this.cloudBearerToken ? { Authorization: `Bearer ${this.cloudBearerToken}` } : {}),
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({
         text: options.text,
         lang: options.lang,

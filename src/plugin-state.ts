@@ -1,9 +1,12 @@
 import type { TtsReaderVoice } from "./sdk.js";
 
 export type VoiceFilter = "all" | "premium" | "basic";
+export type AuthMode = "uapi-key" | "cloud-bearer";
 
 export interface TtsReaderPluginSettings {
   apiKey: string;
+  cloudBearerToken: string;
+  authMode: AuthMode;
   preferredVoiceId: string;
   preferredMode: "cloud-playback" | "uapi-export";
   defaultRate: number;
@@ -15,6 +18,8 @@ export interface TtsReaderPluginSettings {
 
 export const DEFAULT_SETTINGS: TtsReaderPluginSettings = {
   apiKey: "",
+  cloudBearerToken: "",
+  authMode: "uapi-key",
   preferredVoiceId: "",
   preferredMode: "cloud-playback",
   defaultRate: 1,
@@ -148,14 +153,22 @@ export function getPremiumUsageAfterRead(
   };
 }
 
-export function shouldCountPremiumUsage(isPremiumVoice: boolean, mode: TtsReaderPluginSettings["preferredMode"]): boolean {
-  return isPremiumVoice && mode === "uapi-export";
+export function shouldCountPremiumUsage(
+  isPremiumVoice: boolean,
+  mode: TtsReaderPluginSettings["preferredMode"],
+  authMode: AuthMode = "uapi-key",
+): boolean {
+  return isPremiumVoice && (mode === "uapi-export" || authMode === "cloud-bearer");
 }
 
 export function resolveServerCustomTextMode(
   mode: TtsReaderPluginSettings["preferredMode"],
   hasApiKey: boolean,
+  hasCloudBearerToken = false,
 ): TtsReaderPluginSettings["preferredMode"] | "" {
+  if (hasCloudBearerToken) {
+    return "cloud-playback";
+  }
   if (mode === "uapi-export" || hasApiKey) {
     return "uapi-export";
   }
