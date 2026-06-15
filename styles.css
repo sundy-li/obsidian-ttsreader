@@ -10,6 +10,7 @@
 }
 
 .ttsreader-plugin-control select,
+.ttsreader-plugin-control input[type="password"],
 .ttsreader-plugin-control input[type="range"] {
   width: 100%;
 }

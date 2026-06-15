@@ -299,6 +299,16 @@ class TtsReaderModal extends Modal {
     this.textArea.value = this.initialText;
     this.textArea.placeholder = "Text to speech";
 
+    const apiKeyRow = wrapper.createDiv({ cls: "ttsreader-plugin-row" });
+    apiKeyRow.createEl("label", { text: "UAPI Key" });
+    const apiKeyInput = apiKeyRow.createEl("input", { type: "password" });
+    apiKeyInput.placeholder = "UAPI-...";
+    apiKeyInput.value = this.plugin.settings.apiKey;
+    apiKeyInput.addEventListener("change", async () => {
+      this.plugin.settings.apiKey = normalizeUapiKey(apiKeyInput.value);
+      await this.plugin.saveSettings();
+    });
+
     const languageRow = wrapper.createDiv({ cls: "ttsreader-plugin-row" });
     languageRow.createEl("label", { text: "Reading Language" });
     this.languageSelect = languageRow.createEl("select");
@@ -505,6 +515,8 @@ class TtsReaderModal extends Modal {
 
 class TtsReaderSettingTab extends PluginSettingTab {
   private readonly plugin: TtsReaderPlugin;
+  private voices: TtsReaderVoice[] = [];
+  private languageGroups: VoiceLanguageGroup[] = [];
 
   constructor(app: App, plugin: TtsReaderPlugin) {
     super(app, plugin);
@@ -512,6 +524,10 @@ class TtsReaderSettingTab extends PluginSettingTab {
   }
 
   display(): void {
+    void this.displayAsync();
+  }
+
+  private async displayAsync(): Promise<void> {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.createEl("h2", { text: "TTSReader" });
@@ -524,7 +540,113 @@ class TtsReaderSettingTab extends PluginSettingTab {
           .setPlaceholder("UAPI-...")
           .setValue(this.plugin.settings.apiKey)
           .onChange(async (value) => {
-            this.plugin.settings.apiKey = value.trim().replace(/^Bearer\s+/i, "").replace(/^UAPI-/, "");
+            this.plugin.settings.apiKey = normalizeUapiKey(value);
+            await this.plugin.saveSettings();
+          });
+      });
+
+    this.voices = await waitForVoices();
+    this.languageGroups = groupVoicesByLanguage(this.voices);
+    const languageCode = this.chooseLanguageCode();
+    const accentCode = this.chooseAccentCode(languageCode);
+    const filteredVoices = filterVoicesForSelection(this.voices, {
+      languageCode,
+      accentCode,
+      voiceFilter: this.plugin.settings.voiceFilter,
+    });
+    const selectedVoiceId = chooseInitialVoiceId(filteredVoices, this.plugin.settings.preferredVoiceId);
+
+    new Setting(containerEl)
+      .setName("Reading language")
+      .addDropdown((dropdown) => {
+        for (const group of this.languageGroups) {
+          dropdown.addOption(group.languageCode, `${group.flag} ${group.name}`.trim());
+        }
+        dropdown.setValue(languageCode).onChange(async (value) => {
+          this.plugin.settings.preferredLanguageCode = value;
+          this.plugin.settings.preferredAccentCode = "";
+          await this.plugin.saveSettings();
+          this.display();
+        });
+      });
+
+    const accents = this.languageGroups.find((group) => group.languageCode === languageCode)?.accents ?? [];
+    new Setting(containerEl)
+      .setName("Region / Accent")
+      .addDropdown((dropdown) => {
+        for (const accent of accents) {
+          dropdown.addOption(accent.code, `${accent.flag} ${accent.name}`.trim());
+        }
+        dropdown.setValue(accentCode).onChange(async (value) => {
+          this.plugin.settings.preferredAccentCode = value;
+          await this.plugin.saveSettings();
+          this.display();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Voice selection")
+      .addDropdown((dropdown) => {
+        dropdown
+          .addOption("all", "All")
+          .addOption("premium", "Premium")
+          .addOption("basic", "Basic")
+          .setValue(this.plugin.settings.voiceFilter)
+          .onChange(async (value) => {
+            this.plugin.settings.voiceFilter = value as VoiceFilter;
+            await this.plugin.saveSettings();
+            this.display();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Reader")
+      .setDesc(`${filteredVoices.length} of ${this.voices.length} voices shown`)
+      .addDropdown((dropdown) => {
+        for (const voice of filteredVoices) {
+          const badge = voice.isPremium ? "Premium" : "Basic";
+          const source = voice.source === "browser" ? "Browser" : "TTSReader";
+          dropdown.addOption(voice.id, `${voice.name} (${badge}, ${source})`);
+        }
+        dropdown.setValue(selectedVoiceId).onChange(async (value) => {
+          this.plugin.settings.preferredVoiceId = value;
+          await this.plugin.saveSettings();
+        });
+      })
+      .addButton((button) => {
+        button
+          .setButtonText("Play sample")
+          .setDisabled(!selectedVoiceId)
+          .onClick(async () => {
+            const voice = this.voices.find((candidate) => candidate.id === this.plugin.settings.preferredVoiceId) ??
+              this.voices.find((candidate) => candidate.id === selectedVoiceId);
+            if (!voice) {
+              new Notice("TTSReader: no voice selected.");
+              return;
+            }
+            try {
+              await this.plugin.playVoiceSample(
+                voice,
+                this.plugin.settings.defaultRate,
+                this.plugin.settings.preferredMode,
+              );
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              new Notice(`TTSReader: ${message}`);
+            }
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Default server mode")
+      .setDesc("UAPI export uses the selected TTSReader voice for custom text. Cloud playback can preview samples.")
+      .addDropdown((dropdown) => {
+        dropdown
+          .addOption("cloud-playback", "Cloud playback")
+          .addOption("uapi-export", "UAPI export")
+          .setValue(this.plugin.settings.preferredMode)
+          .onChange(async (value) => {
+            this.plugin.settings.preferredMode = value as TtsReaderPluginSettings["preferredMode"];
             await this.plugin.saveSettings();
           });
       });
@@ -543,18 +665,8 @@ class TtsReaderSettingTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
-      .setName("Default server mode")
-      .setDesc("Cloud playback mirrors the website player. UAPI export requires an API key.")
-      .addDropdown((dropdown) => {
-        dropdown
-          .addOption("cloud-playback", "Cloud playback")
-          .addOption("uapi-export", "UAPI export")
-          .setValue(this.plugin.settings.preferredMode)
-          .onChange(async (value) => {
-            this.plugin.settings.preferredMode = value as TtsReaderPluginSettings["preferredMode"];
-            await this.plugin.saveSettings();
-          });
-      });
+      .setName("Premium usage")
+      .setDesc(formatPremiumUsage(this.plugin.settings.premiumCharsUsed));
 
     new Setting(containerEl)
       .setName("Premium account sign-in")
@@ -567,6 +679,25 @@ class TtsReaderSettingTab extends PluginSettingTab {
           .onClick(() => this.plugin.openTtsReaderSignIn());
       });
   }
+
+  private chooseLanguageCode(): string {
+    const configured = this.plugin.settings.preferredLanguageCode;
+    if (configured && this.languageGroups.some((group) => group.languageCode === configured)) {
+      return configured;
+    }
+
+    return this.languageGroups[0]?.languageCode ?? "";
+  }
+
+  private chooseAccentCode(languageCode: string): string {
+    const accents = this.languageGroups.find((group) => group.languageCode === languageCode)?.accents ?? [];
+    const configured = this.plugin.settings.preferredAccentCode;
+    return accents.some((accent) => accent.code === configured) ? configured : accents[0]?.code ?? "";
+  }
+}
+
+function normalizeUapiKey(value: string): string {
+  return value.trim().replace(/^Bearer\s+/i, "").replace(/^UAPI-/i, "");
 }
 
 async function waitForVoices(): Promise<TtsReaderVoice[]> {
