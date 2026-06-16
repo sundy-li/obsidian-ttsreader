@@ -521,6 +521,29 @@ function isAuthorizationError(message: string): boolean {
   return /\b(401|403)\b/.test(message) || /auth|token|permission|unauthori[sz]ed|forbidden/i.test(message);
 }
 
+function addSecretVisibilityButton(inputEl: HTMLInputElement, parentEl: HTMLElement): HTMLButtonElement {
+  const button = parentEl.createEl("button", {
+    text: "Show",
+    cls: "ttsreader-plugin-secret-toggle",
+  });
+  button.type = "button";
+  button.setAttribute("aria-label", "Show secret value");
+  button.addEventListener("click", () => {
+    const shouldShow = inputEl.type === "password";
+    inputEl.type = shouldShow ? "text" : "password";
+    button.setText(shouldShow ? "Hide" : "Show");
+    button.setAttribute("aria-label", shouldShow ? "Hide secret value" : "Show secret value");
+  });
+  return button;
+}
+
+function toggleSecretInput(inputEl: HTMLInputElement, buttonEl: HTMLButtonElement): void {
+  const shouldShow = inputEl.type === "password";
+  inputEl.type = shouldShow ? "text" : "password";
+  buttonEl.setText(shouldShow ? "Hide" : "Show");
+  buttonEl.setAttribute("aria-label", shouldShow ? "Hide secret value" : "Show secret value");
+}
+
 class TtsReaderErrorModal extends Modal {
   constructor(app: App, private readonly message: string) {
     super(app);
@@ -600,6 +623,7 @@ class TtsReaderModal extends Modal {
       this.plugin.settings.credential = normalizeCredential(credentialInput.value);
       await this.plugin.saveSettings();
     });
+    addSecretVisibilityButton(credentialInput, credentialRow);
 
     const firebaseApiKeyRow = wrapper.createDiv({ cls: "ttsreader-plugin-row" });
     firebaseApiKeyRow.createEl("label", { text: "Firebase API key" });
@@ -612,6 +636,7 @@ class TtsReaderModal extends Modal {
       this.plugin.settings.firebaseAccessTokenExpiresAt = 0;
       await this.plugin.saveSettings();
     });
+    addSecretVisibilityButton(firebaseApiKeyInput, firebaseApiKeyRow);
 
     const firebaseRefreshRow = wrapper.createDiv({ cls: "ttsreader-plugin-row" });
     firebaseRefreshRow.createEl("label", { text: "Firebase refresh token" });
@@ -624,6 +649,7 @@ class TtsReaderModal extends Modal {
       this.plugin.settings.firebaseAccessTokenExpiresAt = 0;
       await this.plugin.saveSettings();
     });
+    addSecretVisibilityButton(firebaseRefreshInput, firebaseRefreshRow);
 
     const languageRow = wrapper.createDiv({ cls: "ttsreader-plugin-row" });
     languageRow.createEl("label", { text: "Reading Language" });
@@ -857,6 +883,7 @@ class TtsReaderSettingTab extends PluginSettingTab {
     containerEl.empty();
     containerEl.createEl("h2", { text: "TTSReader" });
 
+    let credentialInputEl: HTMLInputElement | null = null;
     new Setting(containerEl)
       .setName("Authorization / UAPI Key")
       .setDesc("Paste a UAPI key, or paste a short-lived Authorization Bearer token. Firebase credentials below are preferred for cloud playback because the plugin can refresh them.")
@@ -869,8 +896,20 @@ class TtsReaderSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           });
         text.inputEl.type = "password";
+        credentialInputEl = text.inputEl;
+      })
+      .addButton((button) => {
+        if (!credentialInputEl) {
+          return;
+        }
+        const inputEl = credentialInputEl;
+        button
+          .setButtonText("Show")
+          .setTooltip("Show secret value")
+          .onClick(() => toggleSecretInput(inputEl, button.buttonEl));
       });
 
+    let firebaseApiKeyInputEl: HTMLInputElement | null = null;
     new Setting(containerEl)
       .setName("Firebase API key")
       .setDesc("Use the apiKey from the TTSReader Firebase auth record.")
@@ -885,8 +924,20 @@ class TtsReaderSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           });
         text.inputEl.type = "password";
+        firebaseApiKeyInputEl = text.inputEl;
+      })
+      .addButton((button) => {
+        if (!firebaseApiKeyInputEl) {
+          return;
+        }
+        const inputEl = firebaseApiKeyInputEl;
+        button
+          .setButtonText("Show")
+          .setTooltip("Show secret value")
+          .onClick(() => toggleSecretInput(inputEl, button.buttonEl));
       });
 
+    let firebaseRefreshInputEl: HTMLInputElement | null = null;
     new Setting(containerEl)
       .setName("Firebase refresh token")
       .setDesc("Use stsTokenManager.refreshToken from the TTSReader Firebase auth record. Treat it like a password.")
@@ -901,6 +952,17 @@ class TtsReaderSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           });
         text.inputEl.type = "password";
+        firebaseRefreshInputEl = text.inputEl;
+      })
+      .addButton((button) => {
+        if (!firebaseRefreshInputEl) {
+          return;
+        }
+        const inputEl = firebaseRefreshInputEl;
+        button
+          .setButtonText("Show")
+          .setTooltip("Show secret value")
+          .onClick(() => toggleSecretInput(inputEl, button.buttonEl));
       });
 
     this.voices = await waitForVoices();

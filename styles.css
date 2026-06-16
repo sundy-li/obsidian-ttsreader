@@ -10,6 +10,7 @@
 }
 
 .ttsreader-plugin-control select,
+.ttsreader-plugin-control input[type="text"],
 .ttsreader-plugin-control input[type="password"],
 .ttsreader-plugin-control input[type="range"] {
   width: 100%;
@@ -28,6 +29,12 @@
 
 .ttsreader-plugin-row > * {
   flex: 1;
+}
+
+.ttsreader-plugin-row .ttsreader-plugin-secret-toggle {
+  flex: 0 0 auto;
+  min-width: 58px;
+  white-space: nowrap;
 }
 
 .ttsreader-plugin-voice-row select {
