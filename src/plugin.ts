@@ -470,6 +470,8 @@ export default class TtsReaderPlugin extends Plugin {
       return credential.cloudBearerToken ?? "";
     }
 
+    validateFirebaseRefreshCredentials(credential.firebaseApiKey ?? "", credential.firebaseRefreshToken ?? "");
+
     const now = Date.now();
     if (!forceRefresh && this.settings.firebaseAccessToken && this.settings.firebaseAccessTokenExpiresAt - now > 60_000) {
       return this.settings.firebaseAccessToken;
@@ -519,6 +521,21 @@ function shortenStatusDetail(detail: string): string {
 
 function isAuthorizationError(message: string): boolean {
   return /\b(401|403)\b/.test(message) || /auth|token|permission|unauthori[sz]ed|forbidden/i.test(message);
+}
+
+function validateFirebaseRefreshCredentials(apiKey: string, refreshToken: string): void {
+  if (!apiKey.startsWith("AIza")) {
+    throw new Error("Firebase API key should start with AIza. Copy value.apiKey from the TTSReader Firebase auth record.");
+  }
+  if (!refreshToken.startsWith("AMf-")) {
+    throw new Error("Firebase refresh token should start with AMf-. Copy value.stsTokenManager.refreshToken from the TTSReader Firebase auth record.");
+  }
+  if (refreshToken.includes("…") || refreshToken.includes("...")) {
+    throw new Error("Firebase refresh token is truncated. It contains an ellipsis; expand the value and copy the full string, not the DevTools preview.");
+  }
+  if (/\s/.test(apiKey) || /\s/.test(refreshToken)) {
+    throw new Error("Firebase API key and refresh token must not contain spaces or line breaks.");
+  }
 }
 
 function addSecretVisibilityButton(inputEl: HTMLInputElement, parentEl: HTMLElement): HTMLButtonElement {
