@@ -227,6 +227,28 @@ describe("TTSReader SDK", () => {
     assert.equal(String(calls[0].init.body), "grant_type=refresh_token&refresh_token=old-refresh-token");
   });
 
+  it("surfaces Firebase refresh error messages clearly", async () => {
+    const fetcher: typeof fetch = async () => new Response(JSON.stringify({
+      error: {
+        code: 400,
+        message: "INVALID_REFRESH_TOKEN",
+        status: "INVALID_ARGUMENT",
+      },
+    }), {
+      status: 400,
+      headers: { "content-type": "application/json" },
+    });
+
+    await assert.rejects(
+      refreshFirebaseIdToken({
+        apiKey: "firebase-api-key",
+        refreshToken: "bad-refresh-token",
+        fetch: fetcher,
+      }),
+      /Firebase token refresh failed: 400 - INVALID_REFRESH_TOKEN/,
+    );
+  });
+
   it("classifies server voice ids and clamps rates like the player", () => {
     assert.equal(isServerVoice("ttsreaderServer.gcp.en-US-Chirp-HD-D"), true);
     assert.equal(isServerVoice("azure.en-US-AriaNeural"), true);

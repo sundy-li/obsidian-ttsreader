@@ -199,7 +199,12 @@ export async function refreshFirebaseIdToken(
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
-    throw new Error(`Firebase token refresh failed: ${response.status} ${response.statusText}${body ? ` - ${body}` : ""}`);
+    const firebaseMessage = parseFirebaseErrorMessage(body);
+    throw new Error(
+      `Firebase token refresh failed: ${response.status}${response.statusText ? ` ${response.statusText}` : ""}${
+        firebaseMessage ? ` - ${firebaseMessage}` : body ? ` - ${body}` : ""
+      }`,
+    );
   }
 
   const body = await response.json() as Partial<{
@@ -216,6 +221,24 @@ export async function refreshFirebaseIdToken(
     refreshToken: body.refresh_token ?? refreshToken,
     expiresIn: Number(body.expires_in) || 3600,
   };
+}
+
+function parseFirebaseErrorMessage(body: string): string {
+  if (!body.trim()) {
+    return "";
+  }
+
+  try {
+    const parsed = JSON.parse(body) as Partial<{
+      error: Partial<{
+        message: string;
+        status: string;
+      }>;
+    }>;
+    return parsed.error?.message ?? parsed.error?.status ?? "";
+  } catch {
+    return body.replace(/\s+/g, " ").trim();
+  }
 }
 
 async function readAudioResponse(response: Response, message: string): Promise<TtsReaderAudio> {

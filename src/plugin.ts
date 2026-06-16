@@ -39,6 +39,7 @@ export default class TtsReaderPlugin extends Plugin {
   private statusLabelEl!: HTMLElement;
   private statusTimeEl!: HTMLElement;
   private statusTimer: number | null = null;
+  private lastPlaybackError = "";
   private browserSpeechStartedAt = 0;
   private browserSpeechEstimatedDuration = 0;
 
@@ -306,6 +307,11 @@ export default class TtsReaderPlugin extends Plugin {
     this.statusBarEl.addClass("ttsreader-plugin-statusbar");
     this.statusBarEl.addClass("ttsreader-plugin-statusbar-idle");
     this.statusBarEl.setAttribute("aria-label", "TTSReader playback status");
+    this.statusBarEl.addEventListener("click", () => {
+      if (this.lastPlaybackError) {
+        new TtsReaderErrorModal(this.app, this.lastPlaybackError).open();
+      }
+    });
 
     this.statusBarEl.createSpan({ cls: "ttsreader-plugin-statusbar-icon", text: "♫" });
     this.statusLabelEl = this.statusBarEl.createSpan({ cls: "ttsreader-plugin-statusbar-label", text: "TTSReader" });
@@ -365,6 +371,7 @@ export default class TtsReaderPlugin extends Plugin {
     this.statusBarEl.removeClass("ttsreader-plugin-statusbar-error");
     this.statusBarEl.addClass("ttsreader-plugin-statusbar-active");
     this.statusBarEl.setAttribute("aria-label", `TTSReader playback status: ${label}`);
+    this.statusBarEl.removeAttribute("title");
     this.statusLabelEl.setText(label);
     this.statusTimeEl.setText(duration > 0 ? `${formatTime(current)} / ${formatTime(duration)}` : formatTime(current));
   }
@@ -383,6 +390,11 @@ export default class TtsReaderPlugin extends Plugin {
     this.statusLabelEl.setText(label);
     this.statusTimeEl.setText(detail ? shortenStatusDetail(detail) : "--:--");
     this.statusBarEl.setAttribute("aria-label", detail ? `TTSReader playback status: ${label}. ${detail}` : `TTSReader playback status: ${label}`);
+    if (detail) {
+      this.statusBarEl.setAttribute("title", detail);
+    } else {
+      this.statusBarEl.removeAttribute("title");
+    }
   }
 
   private chooseConfiguredVoice(voices: TtsReaderVoice[]): TtsReaderVoice | undefined {
@@ -435,6 +447,9 @@ export default class TtsReaderPlugin extends Plugin {
   }
 
   showPlaybackError(message: string): void {
+    this.lastPlaybackError = message;
+    console.error("TTSReader playback error:", message);
+    new Notice(`TTSReader: ${message}`, 12000);
     this.finishPlaybackStatus("Error", message);
   }
 
@@ -504,6 +519,40 @@ function shortenStatusDetail(detail: string): string {
 
 function isAuthorizationError(message: string): boolean {
   return /\b(401|403)\b/.test(message) || /auth|token|permission|unauthori[sz]ed|forbidden/i.test(message);
+}
+
+class TtsReaderErrorModal extends Modal {
+  constructor(app: App, private readonly message: string) {
+    super(app);
+  }
+
+  onOpen(): void {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl("h2", { text: "TTSReader error" });
+    contentEl.createEl("pre", {
+      cls: "ttsreader-plugin-error-detail",
+      text: this.message,
+    });
+    new Setting(contentEl)
+      .addButton((button) => {
+        button
+          .setButtonText("Copy error")
+          .onClick(async () => {
+            await navigator.clipboard.writeText(this.message);
+            new Notice("TTSReader error copied.");
+          });
+      })
+      .addButton((button) => {
+        button
+          .setButtonText("Close")
+          .onClick(() => this.close());
+      });
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
 }
 
 class TtsReaderModal extends Modal {
