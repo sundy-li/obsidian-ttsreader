@@ -119,15 +119,17 @@ describe("plugin state helpers", () => {
     assert.equal(shouldCountPremiumUsage(true, "uapi-export"), true);
     assert.equal(shouldCountPremiumUsage(true, "cloud-playback"), false);
     assert.equal(shouldCountPremiumUsage(true, "cloud-playback", "cloud-bearer"), true);
+    assert.equal(shouldCountPremiumUsage(true, "cloud-playback", "firebase-refresh"), true);
     assert.equal(shouldCountPremiumUsage(false, "uapi-export"), false);
   });
 
   it("requires UAPI export for custom text with TTSReader server voices", () => {
     assert.equal(resolveServerCustomTextMode("cloud-playback", false), "");
     assert.equal(resolveServerCustomTextMode("cloud-playback", true), "uapi-export");
-    assert.equal(resolveServerCustomTextMode("uapi-export", false), "uapi-export");
+    assert.equal(resolveServerCustomTextMode("uapi-export", false), "");
     assert.equal(resolveServerCustomTextMode("cloud-playback", false, true), "cloud-playback");
-    assert.equal(resolveServerCustomTextMode("uapi-export", true, true), "cloud-playback");
+    assert.equal(resolveServerCustomTextMode("uapi-export", true, true), "uapi-export");
+    assert.equal(resolveServerCustomTextMode("uapi-export", false, true), "cloud-playback");
   });
 
   it("detects the authorization credential type from one input", () => {
@@ -135,10 +137,25 @@ describe("plugin state helpers", () => {
     assert.equal(getCredentialKind("UAPI-abc123"), "uapi-key");
     assert.equal(getCredentialKind("Bearer UAPI-abc123"), "uapi-key");
     assert.equal(getCredentialKind("Bearer eyJhbGciOiJSUzI1NiJ9.payload.signature"), "cloud-bearer");
-    assert.deepEqual(getCredentialParts("UAPI-abc123"), { kind: "uapi-key", apiKey: "abc123" });
+    assert.deepEqual(getCredentialParts("UAPI-abc123"), {
+      kind: "uapi-key",
+      apiKey: "abc123",
+      cloudCredentialKind: "none",
+      hasCloudAuth: false,
+    });
     assert.deepEqual(getCredentialParts("Bearer cloud-token"), {
       kind: "cloud-bearer",
       cloudBearerToken: "cloud-token",
+      cloudCredentialKind: "cloud-bearer",
+      hasCloudAuth: true,
+    });
+    assert.deepEqual(getCredentialParts("UAPI-abc123", "firebase-api-key", "refresh-token"), {
+      kind: "uapi-key",
+      apiKey: "abc123",
+      firebaseApiKey: "firebase-api-key",
+      firebaseRefreshToken: "refresh-token",
+      cloudCredentialKind: "firebase-refresh",
+      hasCloudAuth: true,
     });
   });
 

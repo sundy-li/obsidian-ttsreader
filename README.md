@@ -13,7 +13,7 @@ This project contains an Obsidian desktop plugin plus a small TypeScript SDK for
 - Use browser/Web Speech voices for local playback.
 - Use bundled TTSReader server voices for cloud playback.
 - Track the website-style premium playback quota: `Used x / 5,000 chars for premium voices.`
-- Optionally use a TTSReader `UAPI-*` key for export mode.
+- Optionally use a TTSReader `UAPI-*` key, a temporary Bearer token, or Firebase refresh credentials for authenticated server playback.
 
 ## Installation
 
@@ -55,12 +55,13 @@ styles.css -> <your vault>/.obsidian/plugins/ttsreader/styles.css
 
 The plugin can open the TTSReader sign-in page from settings, but Obsidian cannot read Google/Apple login cookies from your external browser session.
 
-For authenticated server voices, paste one credential into `Authorization / UAPI Key`:
+For authenticated server voices, use one of these credential options:
 
 - `UAPI-...`: Uses the official TTSReader UAPI export path.
 - `Bearer eyJ...`: Uses the TTSReader cloud playback endpoint with the pasted bearer token.
+- `Firebase API key` + `Firebase refresh token`: Refreshes the short-lived cloud playback Bearer token automatically.
 
-The bearer token is not a Cookie, can expire, and should be treated like a password. Cloud playback mirrors the website test/playback path and tracks premium usage locally against the 5,000 character limit shown in the UI.
+Bearer and Firebase refresh tokens are not Cookies and should be treated like passwords. Cloud playback mirrors the website test/playback path and tracks premium usage locally against the 5,000 character limit shown in the UI.
 
 ## Development
 

@@ -1,6 +1,6 @@
 import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, requestUrl } from "obsidian";
 
-import { TtsReaderClient, type TtsReaderVoice, isServerVoice } from "./sdk.js";
+import { TtsReaderClient, type TtsReaderVoice, isServerVoice, refreshFirebaseIdToken } from "./sdk.js";
 import { makeObsidianFetch } from "./obsidian-fetch.js";
 import {
   DEFAULT_SETTINGS,
@@ -133,8 +133,8 @@ export default class TtsReaderPlugin extends Plugin {
       return;
     }
 
-    const credential = getCredentialParts(this.settings.credential);
-    if (shouldCountPremiumUsage(voice.isPremium, this.settings.preferredMode, credential.kind)) {
+    const credential = this.getCredentialParts();
+    if (shouldCountPremiumUsage(voice.isPremium, this.settings.preferredMode, credential.cloudCredentialKind || credential.kind)) {
       const usage = getPremiumUsageAfterRead(this.settings.premiumCharsUsed, text);
       if (usage.exceeded) {
         new Notice(`TTSReader: premium voice limit exceeded: ${usage.used.toLocaleString()} / ${PREMIUM_CHAR_LIMIT.toLocaleString()} chars.`);
@@ -144,7 +144,7 @@ export default class TtsReaderPlugin extends Plugin {
 
     await this.speak(text, voice.id, this.settings.defaultRate, this.settings.preferredMode);
 
-    if (shouldCountPremiumUsage(voice.isPremium, this.settings.preferredMode, credential.kind)) {
+    if (shouldCountPremiumUsage(voice.isPremium, this.settings.preferredMode, credential.cloudCredentialKind || credential.kind)) {
       this.settings.premiumCharsUsed = getPremiumUsageAfterRead(this.settings.premiumCharsUsed, text).used;
       await this.saveSettings();
     }
@@ -188,14 +188,14 @@ export default class TtsReaderPlugin extends Plugin {
       throw new Error(message);
     }
 
-    const credential = getCredentialParts(this.settings.credential);
+    const credential = this.getCredentialParts();
     const serverMode = resolveServerCustomTextMode(
       mode,
       Boolean(credential.apiKey),
-      Boolean(credential.cloudBearerToken),
+      credential.hasCloudAuth,
     );
     if (!serverMode) {
-      const message = "Selected TTSReader voices can preview samples, but custom text requires a UAPI key or Cloud Bearer token. Add authorization in settings or choose a browser voice.";
+      const message = "Selected TTSReader voices can preview samples, but custom text requires a UAPI key, Cloud Bearer token, or Firebase refresh token. Add authorization in settings or choose a browser voice.";
       this.showPlaybackError(message);
       throw new Error(message);
     }
@@ -211,12 +211,8 @@ export default class TtsReaderPlugin extends Plugin {
     isTest: boolean,
   ): Promise<void> {
     this.stopPlayback();
-    const credential = getCredentialParts(this.settings.credential);
-    const client = new TtsReaderClient({
-      apiKey: credential.apiKey,
-      cloudBearerToken: credential.cloudBearerToken,
-      fetch: makeObsidianFetch(requestUrl),
-    });
+    const credential = this.getCredentialParts();
+    const fetcher = makeObsidianFetch(requestUrl);
     const options = {
       text,
       voiceId: voice.id,
@@ -233,18 +229,42 @@ export default class TtsReaderPlugin extends Plugin {
       rate,
       mode: options.mode,
       isTest,
-      credentialKind: credential.kind,
-      credentialFingerprint: fingerprintCredential(this.settings.credential),
+      credentialKind: options.mode === "uapi-export" ? credential.kind : credential.cloudCredentialKind,
+      credentialFingerprint: this.getCredentialFingerprint(credential, options.mode),
     });
     const cachedAudio = getBoundedCacheEntry(this.audioCache, cacheKey);
     let audio = cachedAudio;
     if (!audio) {
       try {
+        const cloudBearerToken = options.mode === "cloud-playback"
+          ? await this.getCloudBearerToken(credential, false, fetcher)
+          : "";
+        const client = new TtsReaderClient({
+          apiKey: credential.apiKey,
+          cloudBearerToken,
+          fetch: fetcher,
+        });
         audio = await client.synthesize(options);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        this.showPlaybackError(message);
-        throw error;
+        if (options.mode === "cloud-playback" && credential.cloudCredentialKind === "firebase-refresh" && isAuthorizationError(message)) {
+          try {
+            const cloudBearerToken = await this.getCloudBearerToken(credential, true, fetcher);
+            const client = new TtsReaderClient({
+              apiKey: credential.apiKey,
+              cloudBearerToken,
+              fetch: fetcher,
+            });
+            audio = await client.synthesize(options);
+          } catch (retryError) {
+            const retryMessage = retryError instanceof Error ? retryError.message : String(retryError);
+            this.showPlaybackError(retryMessage);
+            throw retryError;
+          }
+        } else {
+          this.showPlaybackError(message);
+          throw error;
+        }
       }
       putBoundedCacheEntry(this.audioCache, cacheKey, audio, AUDIO_CACHE_LIMIT);
     }
@@ -417,6 +437,53 @@ export default class TtsReaderPlugin extends Plugin {
   showPlaybackError(message: string): void {
     this.finishPlaybackStatus("Error", message);
   }
+
+  private getCredentialParts() {
+    return getCredentialParts(
+      this.settings.credential,
+      this.settings.firebaseApiKey,
+      this.settings.firebaseRefreshToken,
+    );
+  }
+
+  private async getCloudBearerToken(
+    credential: ReturnType<typeof getCredentialParts>,
+    forceRefresh: boolean,
+    fetcher: typeof fetch,
+  ): Promise<string> {
+    if (credential.cloudCredentialKind !== "firebase-refresh") {
+      return credential.cloudBearerToken ?? "";
+    }
+
+    const now = Date.now();
+    if (!forceRefresh && this.settings.firebaseAccessToken && this.settings.firebaseAccessTokenExpiresAt - now > 60_000) {
+      return this.settings.firebaseAccessToken;
+    }
+
+    const refreshed = await refreshFirebaseIdToken({
+      apiKey: credential.firebaseApiKey ?? "",
+      refreshToken: credential.firebaseRefreshToken ?? "",
+      fetch: fetcher,
+    });
+    this.settings.firebaseAccessToken = refreshed.idToken;
+    this.settings.firebaseRefreshToken = refreshed.refreshToken;
+    this.settings.firebaseAccessTokenExpiresAt = now + refreshed.expiresIn * 1000;
+    await this.saveSettings();
+    return refreshed.idToken;
+  }
+
+  private getCredentialFingerprint(
+    credential: ReturnType<typeof getCredentialParts>,
+    mode: "cloud-playback" | "uapi-export",
+  ): string {
+    if (mode === "cloud-playback" && credential.cloudCredentialKind === "firebase-refresh") {
+      return fingerprintCredential(`${credential.firebaseApiKey ?? ""}:${credential.firebaseRefreshToken ?? ""}`);
+    }
+    if (mode === "cloud-playback" && credential.cloudBearerToken) {
+      return fingerprintCredential(credential.cloudBearerToken);
+    }
+    return fingerprintCredential(this.settings.credential);
+  }
 }
 
 function getFiniteDuration(duration: number): number {
@@ -433,6 +500,10 @@ function formatTime(seconds: number): string {
 function shortenStatusDetail(detail: string): string {
   const normalized = detail.replace(/\s+/g, " ").trim();
   return normalized.length > 34 ? `${normalized.slice(0, 31)}...` : normalized;
+}
+
+function isAuthorizationError(message: string): boolean {
+  return /\b(401|403)\b/.test(message) || /auth|token|permission|unauthori[sz]ed|forbidden/i.test(message);
 }
 
 class TtsReaderModal extends Modal {
@@ -478,6 +549,30 @@ class TtsReaderModal extends Modal {
     credentialInput.value = this.plugin.settings.credential;
     credentialInput.addEventListener("change", async () => {
       this.plugin.settings.credential = normalizeCredential(credentialInput.value);
+      await this.plugin.saveSettings();
+    });
+
+    const firebaseApiKeyRow = wrapper.createDiv({ cls: "ttsreader-plugin-row" });
+    firebaseApiKeyRow.createEl("label", { text: "Firebase API key" });
+    const firebaseApiKeyInput = firebaseApiKeyRow.createEl("input", { type: "password" });
+    firebaseApiKeyInput.placeholder = "AIza...";
+    firebaseApiKeyInput.value = this.plugin.settings.firebaseApiKey;
+    firebaseApiKeyInput.addEventListener("change", async () => {
+      this.plugin.settings.firebaseApiKey = normalizeCredential(firebaseApiKeyInput.value);
+      this.plugin.settings.firebaseAccessToken = "";
+      this.plugin.settings.firebaseAccessTokenExpiresAt = 0;
+      await this.plugin.saveSettings();
+    });
+
+    const firebaseRefreshRow = wrapper.createDiv({ cls: "ttsreader-plugin-row" });
+    firebaseRefreshRow.createEl("label", { text: "Firebase refresh token" });
+    const firebaseRefreshInput = firebaseRefreshRow.createEl("input", { type: "password" });
+    firebaseRefreshInput.placeholder = "AMf-vB...";
+    firebaseRefreshInput.value = this.plugin.settings.firebaseRefreshToken;
+    firebaseRefreshInput.addEventListener("change", async () => {
+      this.plugin.settings.firebaseRefreshToken = normalizeCredential(firebaseRefreshInput.value);
+      this.plugin.settings.firebaseAccessToken = "";
+      this.plugin.settings.firebaseAccessTokenExpiresAt = 0;
       await this.plugin.saveSettings();
     });
 
@@ -579,8 +674,16 @@ class TtsReaderModal extends Modal {
       const mode = this.modeSelect.value as TtsReaderPluginSettings["preferredMode"];
       const rate = Number(this.rateInput.value) || 1;
       const voice = this.voices.find((candidate) => candidate.id === voiceId);
-      const credential = getCredentialParts(this.plugin.settings.credential);
-      const countPremiumUsage = shouldCountPremiumUsage(Boolean(voice?.isPremium), mode, credential.kind);
+      const credential = getCredentialParts(
+        this.plugin.settings.credential,
+        this.plugin.settings.firebaseApiKey,
+        this.plugin.settings.firebaseRefreshToken,
+      );
+      const countPremiumUsage = shouldCountPremiumUsage(
+        Boolean(voice?.isPremium),
+        mode,
+        credential.cloudCredentialKind || credential.kind,
+      );
       if (countPremiumUsage) {
         const usage = getPremiumUsageAfterRead(this.plugin.settings.premiumCharsUsed, this.textArea.value);
         if (usage.exceeded) {
@@ -707,13 +810,45 @@ class TtsReaderSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Authorization / UAPI Key")
-      .setDesc("Paste a UAPI key, or paste the Authorization Bearer token from the TTSReader cloud request. The plugin auto-detects which one it is.")
+      .setDesc("Paste a UAPI key, or paste a short-lived Authorization Bearer token. Firebase credentials below are preferred for cloud playback because the plugin can refresh them.")
       .addText((text) => {
         text
           .setPlaceholder("UAPI-... or Bearer eyJ...")
           .setValue(this.plugin.settings.credential)
           .onChange(async (value) => {
             this.plugin.settings.credential = normalizeCredential(value);
+            await this.plugin.saveSettings();
+          });
+        text.inputEl.type = "password";
+      });
+
+    new Setting(containerEl)
+      .setName("Firebase API key")
+      .setDesc("Use the apiKey from the TTSReader Firebase auth record.")
+      .addText((text) => {
+        text
+          .setPlaceholder("AIza...")
+          .setValue(this.plugin.settings.firebaseApiKey)
+          .onChange(async (value) => {
+            this.plugin.settings.firebaseApiKey = normalizeCredential(value);
+            this.plugin.settings.firebaseAccessToken = "";
+            this.plugin.settings.firebaseAccessTokenExpiresAt = 0;
+            await this.plugin.saveSettings();
+          });
+        text.inputEl.type = "password";
+      });
+
+    new Setting(containerEl)
+      .setName("Firebase refresh token")
+      .setDesc("Use stsTokenManager.refreshToken from the TTSReader Firebase auth record. Treat it like a password.")
+      .addText((text) => {
+        text
+          .setPlaceholder("AMf-vB...")
+          .setValue(this.plugin.settings.firebaseRefreshToken)
+          .onChange(async (value) => {
+            this.plugin.settings.firebaseRefreshToken = normalizeCredential(value);
+            this.plugin.settings.firebaseAccessToken = "";
+            this.plugin.settings.firebaseAccessTokenExpiresAt = 0;
             await this.plugin.saveSettings();
           });
         text.inputEl.type = "password";
@@ -845,7 +980,7 @@ class TtsReaderSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Premium account sign-in")
       .setDesc(
-        "Opens the TTSReader player in your browser. Obsidian cannot read Google/Apple login cookies from that browser session; use the UAPI key for authenticated export mode.",
+        "Opens the TTSReader player in your browser. Obsidian cannot read Google/Apple login cookies from that browser session; paste Firebase credentials or a UAPI key for authenticated playback.",
       )
       .addButton((button) => {
         button

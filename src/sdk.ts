@@ -27,6 +27,19 @@ export interface TtsReaderClientOptions {
   uapiEndpoint?: string;
 }
 
+export interface FirebaseTokenRefreshOptions {
+  apiKey: string;
+  refreshToken: string;
+  fetch?: typeof fetch;
+  endpoint?: string;
+}
+
+export interface FirebaseTokenRefreshResult {
+  idToken: string;
+  refreshToken: string;
+  expiresIn: number;
+}
+
 export interface SynthesizeOptions {
   text: string;
   voiceId: string;
@@ -39,6 +52,7 @@ export interface SynthesizeOptions {
 
 const DEFAULT_CLOUD_PLAYBACK_ENDPOINT = "https://us-central1-ttsreader.cloudfunctions.net/tts";
 const DEFAULT_UAPI_ENDPOINT = "https://ttsreader.com/api/ttsSync";
+const DEFAULT_FIREBASE_REFRESH_ENDPOINT = "https://securetoken.googleapis.com/v1/token";
 
 export function getBundledServerVoices(): TtsReaderVoice[] {
   return TTSREADER_SERVER_VOICES.map((voice) => ({
@@ -159,6 +173,49 @@ export class TtsReaderClient {
 
     return readAudioResponse(response, "TTSReader UAPI export request failed");
   }
+}
+
+export async function refreshFirebaseIdToken(
+  options: FirebaseTokenRefreshOptions,
+): Promise<FirebaseTokenRefreshResult> {
+  const apiKey = options.apiKey.trim();
+  const refreshToken = options.refreshToken.trim();
+  if (!apiKey || !refreshToken) {
+    throw new Error("Firebase token refresh requires both apiKey and refreshToken.");
+  }
+
+  const fetcher = options.fetch ?? fetch.bind(globalThis);
+  const endpoint = options.endpoint ?? DEFAULT_FIREBASE_REFRESH_ENDPOINT;
+  const response = await fetcher(`${endpoint}?key=${encodeURIComponent(apiKey)}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+    }).toString(),
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`Firebase token refresh failed: ${response.status} ${response.statusText}${body ? ` - ${body}` : ""}`);
+  }
+
+  const body = await response.json() as Partial<{
+    id_token: string;
+    refresh_token: string;
+    expires_in: string | number;
+  }>;
+  if (!body.id_token) {
+    throw new Error("Firebase token refresh did not return an id_token.");
+  }
+
+  return {
+    idToken: body.id_token,
+    refreshToken: body.refresh_token ?? refreshToken,
+    expiresIn: Number(body.expires_in) || 3600,
+  };
 }
 
 async function readAudioResponse(response: Response, message: string): Promise<TtsReaderAudio> {

@@ -7,6 +7,7 @@ import {
   getBrowserVoices,
   isServerVoice,
   normalizeRate,
+  refreshFirebaseIdToken,
 } from "../src/sdk.js";
 
 describe("TTSReader SDK", () => {
@@ -194,6 +195,36 @@ describe("TTSReader SDK", () => {
       rate: 0.8,
       quality: "48khz_192kbps",
     });
+  });
+
+  it("refreshes a Firebase ID token with a refresh token", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fetcher: typeof fetch = async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({
+        id_token: "fresh-id-token",
+        refresh_token: "fresh-refresh-token",
+        expires_in: "3600",
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    };
+
+    const result = await refreshFirebaseIdToken({
+      apiKey: "firebase-api-key",
+      refreshToken: "old-refresh-token",
+      fetch: fetcher,
+    });
+
+    assert.deepEqual(result, {
+      idToken: "fresh-id-token",
+      refreshToken: "fresh-refresh-token",
+      expiresIn: 3600,
+    });
+    assert.equal(calls[0].url, "https://securetoken.googleapis.com/v1/token?key=firebase-api-key");
+    assert.equal(new Headers(calls[0].init.headers).get("content-type"), "application/x-www-form-urlencoded");
+    assert.equal(String(calls[0].init.body), "grant_type=refresh_token&refresh_token=old-refresh-token");
   });
 
   it("classifies server voice ids and clamps rates like the player", () => {

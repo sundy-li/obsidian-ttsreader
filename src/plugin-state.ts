@@ -1,12 +1,17 @@
 import type { TtsReaderVoice } from "./sdk.js";
 
 export type VoiceFilter = "all" | "premium" | "basic";
-export type CredentialKind = "none" | "uapi-key" | "cloud-bearer";
+export type CredentialKind = "none" | "uapi-key" | "cloud-bearer" | "firebase-refresh";
+export type CloudCredentialKind = "none" | "cloud-bearer" | "firebase-refresh";
 
 export interface TtsReaderPluginSettings {
   apiKey: string;
   cloudBearerToken: string;
   credential: string;
+  firebaseApiKey: string;
+  firebaseRefreshToken: string;
+  firebaseAccessToken: string;
+  firebaseAccessTokenExpiresAt: number;
   preferredVoiceId: string;
   preferredMode: "cloud-playback" | "uapi-export";
   defaultRate: number;
@@ -20,6 +25,10 @@ export const DEFAULT_SETTINGS: TtsReaderPluginSettings = {
   apiKey: "",
   cloudBearerToken: "",
   credential: "",
+  firebaseApiKey: "",
+  firebaseRefreshToken: "",
+  firebaseAccessToken: "",
+  firebaseAccessTokenExpiresAt: 0,
   preferredVoiceId: "",
   preferredMode: "cloud-playback",
   defaultRate: 1,
@@ -60,6 +69,16 @@ export interface AudioCacheKeyParts {
   isTest: boolean;
   credentialKind: CredentialKind;
   credentialFingerprint: string;
+}
+
+export interface CredentialParts {
+  kind: CredentialKind;
+  apiKey?: string;
+  cloudBearerToken?: string;
+  firebaseApiKey?: string;
+  firebaseRefreshToken?: string;
+  cloudCredentialKind: CloudCredentialKind;
+  hasCloudAuth: boolean;
 }
 
 export function mergeSettings(settings: Partial<TtsReaderPluginSettings> | null | undefined): TtsReaderPluginSettings {
@@ -170,20 +189,23 @@ export function getPremiumUsageAfterRead(
 export function shouldCountPremiumUsage(
   isPremiumVoice: boolean,
   mode: TtsReaderPluginSettings["preferredMode"],
-  credentialKind: CredentialKind = "none",
+  credentialKind: CredentialKind | CloudCredentialKind = "none",
 ): boolean {
-  return isPremiumVoice && (mode === "uapi-export" || credentialKind === "cloud-bearer");
+  return isPremiumVoice && (mode === "uapi-export" || credentialKind === "cloud-bearer" || credentialKind === "firebase-refresh");
 }
 
 export function resolveServerCustomTextMode(
   mode: TtsReaderPluginSettings["preferredMode"],
   hasApiKey: boolean,
-  hasCloudBearerToken = false,
+  hasCloudAuth = false,
 ): TtsReaderPluginSettings["preferredMode"] | "" {
-  if (hasCloudBearerToken) {
+  if (mode === "uapi-export" && hasApiKey) {
+    return "uapi-export";
+  }
+  if (hasCloudAuth) {
     return "cloud-playback";
   }
-  if (mode === "uapi-export" || hasApiKey) {
+  if (hasApiKey) {
     return "uapi-export";
   }
 
@@ -213,19 +235,40 @@ export function getCredentialKind(value: string): CredentialKind {
   return "cloud-bearer";
 }
 
-export function getCredentialParts(value: string): {
-  kind: CredentialKind;
-  apiKey?: string;
-  cloudBearerToken?: string;
-} {
+export function getCredentialParts(
+  value: string,
+  firebaseApiKey = "",
+  firebaseRefreshToken = "",
+): CredentialParts {
+  const normalizedFirebaseApiKey = normalizeCredential(firebaseApiKey);
+  const normalizedFirebaseRefreshToken = normalizeCredential(firebaseRefreshToken);
+  const hasFirebaseRefresh = Boolean(normalizedFirebaseApiKey && normalizedFirebaseRefreshToken);
   const kind = getCredentialKind(value);
+  const cloudCredentialKind: CloudCredentialKind = hasFirebaseRefresh
+    ? "firebase-refresh"
+    : kind === "cloud-bearer"
+      ? "cloud-bearer"
+      : "none";
+  const shared = {
+    cloudCredentialKind,
+    hasCloudAuth: cloudCredentialKind !== "none",
+    ...(hasFirebaseRefresh
+      ? {
+          firebaseApiKey: normalizedFirebaseApiKey,
+          firebaseRefreshToken: normalizedFirebaseRefreshToken,
+        }
+      : {}),
+  };
   if (kind === "uapi-key") {
-    return { kind, apiKey: normalizeUapiKey(value) };
+    return { kind, apiKey: normalizeUapiKey(value), ...shared };
   }
   if (kind === "cloud-bearer") {
-    return { kind, cloudBearerToken: normalizeBearerToken(value) };
+    return { kind, cloudBearerToken: normalizeBearerToken(value), ...shared };
   }
-  return { kind };
+  if (hasFirebaseRefresh) {
+    return { kind: "firebase-refresh", ...shared };
+  }
+  return { kind, ...shared };
 }
 
 export function fingerprintCredential(value: string): string {
