@@ -18,7 +18,6 @@ export interface TtsReaderPluginSettings {
   preferredLanguageCode: string;
   preferredAccentCode: string;
   voiceFilter: VoiceFilter;
-  premiumCharsUsed: number;
 }
 
 export const DEFAULT_SETTINGS: TtsReaderPluginSettings = {
@@ -35,10 +34,8 @@ export const DEFAULT_SETTINGS: TtsReaderPluginSettings = {
   preferredLanguageCode: "en",
   preferredAccentCode: "en-US",
   voiceFilter: "all",
-  premiumCharsUsed: 0,
 };
 
-export const PREMIUM_CHAR_LIMIT = 5000;
 export const AUDIO_CACHE_LIMIT = 16;
 
 export interface VoiceAccentGroup {
@@ -83,9 +80,11 @@ export interface CredentialParts {
 
 export function mergeSettings(settings: Partial<TtsReaderPluginSettings> | null | undefined): TtsReaderPluginSettings {
   const credential = settings?.credential ?? settings?.apiKey ?? settings?.cloudBearerToken ?? "";
+  const { premiumCharsUsed: _unusedPremiumCharsUsed, ...supportedSettings } =
+    (settings ?? {}) as Partial<TtsReaderPluginSettings> & { premiumCharsUsed?: number };
   return {
     ...DEFAULT_SETTINGS,
-    ...(settings ?? {}),
+    ...supportedSettings,
     credential,
   };
 }
@@ -166,32 +165,6 @@ export function filterVoicesForSelection(
     }
     return true;
   });
-}
-
-export function formatPremiumUsage(used: number, limit = PREMIUM_CHAR_LIMIT): string {
-  return `Used ${Math.max(0, used).toLocaleString()} / ${limit.toLocaleString()} chars for premium voices.`;
-}
-
-export function getPremiumUsageAfterRead(
-  currentUsed: number,
-  text: string,
-  limit = PREMIUM_CHAR_LIMIT,
-): { used: number; limit: number; remaining: number; exceeded: boolean } {
-  const used = Math.max(0, currentUsed) + text.trim().length;
-  return {
-    used,
-    limit,
-    remaining: Math.max(0, limit - used),
-    exceeded: used > limit,
-  };
-}
-
-export function shouldCountPremiumUsage(
-  isPremiumVoice: boolean,
-  mode: TtsReaderPluginSettings["preferredMode"],
-  credentialKind: CredentialKind | CloudCredentialKind = "none",
-): boolean {
-  return isPremiumVoice && (mode === "uapi-export" || credentialKind === "cloud-bearer" || credentialKind === "firebase-refresh");
 }
 
 export function resolveServerCustomTextMode(

@@ -64,11 +64,6 @@
   color: var(--text-on-accent);
 }
 
-.ttsreader-plugin-premium-usage {
-  color: var(--text-muted);
-  font-size: var(--font-ui-small);
-}
-
 .ttsreader-plugin-status {
   color: var(--text-muted);
   font-size: var(--font-ui-small);

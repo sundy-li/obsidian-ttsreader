@@ -4,7 +4,6 @@ import { TtsReaderClient, type TtsReaderVoice, isServerVoice, refreshFirebaseIdT
 import { makeObsidianFetch } from "./obsidian-fetch.js";
 import {
   DEFAULT_SETTINGS,
-  PREMIUM_CHAR_LIMIT,
   type VoiceFilter,
   type TtsReaderPluginSettings,
   AUDIO_CACHE_LIMIT,
@@ -12,10 +11,8 @@ import {
   chooseInitialVoiceId,
   filterVoicesForSelection,
   fingerprintCredential,
-  formatPremiumUsage,
   getBoundedCacheEntry,
   getCredentialParts,
-  getPremiumUsageAfterRead,
   getReadableText,
   getVoiceDemoUrl,
   groupVoicesByLanguage,
@@ -23,7 +20,6 @@ import {
   normalizeCredential,
   putBoundedCacheEntry,
   resolveServerCustomTextMode,
-  shouldCountPremiumUsage,
   type VoiceLanguageGroup,
 } from "./plugin-state.js";
 
@@ -135,21 +131,7 @@ export default class TtsReaderPlugin extends Plugin {
       return;
     }
 
-    const credential = this.getCredentialParts();
-    if (shouldCountPremiumUsage(voice.isPremium, this.settings.preferredMode, credential.cloudCredentialKind || credential.kind)) {
-      const usage = getPremiumUsageAfterRead(this.settings.premiumCharsUsed, text);
-      if (usage.exceeded) {
-        new Notice(`TTSReader: premium voice limit exceeded: ${usage.used.toLocaleString()} / ${PREMIUM_CHAR_LIMIT.toLocaleString()} chars.`);
-        return;
-      }
-    }
-
     await this.speak(text, voice.id, this.settings.defaultRate, this.settings.preferredMode);
-
-    if (shouldCountPremiumUsage(voice.isPremium, this.settings.preferredMode, credential.cloudCredentialKind || credential.kind)) {
-      this.settings.premiumCharsUsed = getPremiumUsageAfterRead(this.settings.premiumCharsUsed, text).used;
-      await this.saveSettings();
-    }
   }
 
   async playVoiceSample(voice: TtsReaderVoice, rate: number, mode: TtsReaderPluginSettings["preferredMode"]): Promise<void> {
@@ -606,7 +588,6 @@ class TtsReaderModal extends Modal {
   private sampleButton!: HTMLButtonElement;
   private modeSelect!: HTMLSelectElement;
   private rateInput!: HTMLInputElement;
-  private premiumUsageEl!: HTMLElement;
   private statusEl!: HTMLElement;
   private voices: TtsReaderVoice[] = [];
   private languageGroups: VoiceLanguageGroup[] = [];
@@ -743,7 +724,6 @@ class TtsReaderModal extends Modal {
       cls: "ttsreader-plugin-sample-button",
     });
     this.sampleButton.addEventListener("click", () => this.playSample());
-    this.premiumUsageEl = wrapper.createDiv({ cls: "ttsreader-plugin-premium-usage" });
 
     const buttonRow = wrapper.createDiv({ cls: "ttsreader-plugin-row" });
     const playButton = buttonRow.createEl("button", { text: "Play" });
@@ -766,26 +746,6 @@ class TtsReaderModal extends Modal {
       const voiceId = this.voiceSelect.value;
       const mode = this.modeSelect.value as TtsReaderPluginSettings["preferredMode"];
       const rate = Number(this.rateInput.value) || 1;
-      const voice = this.voices.find((candidate) => candidate.id === voiceId);
-      const credential = getCredentialParts(
-        this.plugin.settings.credential,
-        this.plugin.settings.firebaseApiKey,
-        this.plugin.settings.firebaseRefreshToken,
-      );
-      const countPremiumUsage = shouldCountPremiumUsage(
-        Boolean(voice?.isPremium),
-        mode,
-        credential.cloudCredentialKind || credential.kind,
-      );
-      if (countPremiumUsage) {
-        const usage = getPremiumUsageAfterRead(this.plugin.settings.premiumCharsUsed, this.textArea.value);
-        if (usage.exceeded) {
-          const message = `Premium voice limit exceeded: ${usage.used.toLocaleString()} / ${PREMIUM_CHAR_LIMIT.toLocaleString()} chars.`;
-          this.statusEl.setText(message);
-          new Notice(`TTSReader: ${message}`);
-          return;
-        }
-      }
       this.plugin.settings.preferredVoiceId = voiceId;
       this.plugin.settings.preferredMode = mode;
       this.plugin.settings.defaultRate = rate;
@@ -794,14 +754,6 @@ class TtsReaderModal extends Modal {
       this.plugin.settings.voiceFilter = this.voiceFilter;
       await this.plugin.saveSettings();
       await this.plugin.speak(this.textArea.value, voiceId, rate, mode);
-      if (countPremiumUsage) {
-        this.plugin.settings.premiumCharsUsed = getPremiumUsageAfterRead(
-          this.plugin.settings.premiumCharsUsed,
-          this.textArea.value,
-        ).used;
-        await this.plugin.saveSettings();
-        this.updatePremiumUsage();
-      }
       this.statusEl.setText("Playing");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -873,12 +825,7 @@ class TtsReaderModal extends Modal {
 
     this.voiceSelect.value = selectedVoiceId;
     this.sampleButton.disabled = !selectedVoiceId;
-    this.updatePremiumUsage();
     this.statusEl.setText(`${filtered.length} of ${this.voices.length} voices shown`);
-  }
-
-  private updatePremiumUsage(): void {
-    this.premiumUsageEl.setText(formatPremiumUsage(this.plugin.settings.premiumCharsUsed));
   }
 }
 
@@ -1113,10 +1060,6 @@ class TtsReaderSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           });
       });
-
-    new Setting(containerEl)
-      .setName("Premium usage")
-      .setDesc(formatPremiumUsage(this.plugin.settings.premiumCharsUsed));
 
     new Setting(containerEl)
       .setName("Premium account sign-in")

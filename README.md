@@ -12,7 +12,6 @@ This project contains an Obsidian desktop plugin plus a small TypeScript SDK for
 - Play a sample from the voice picker before reading.
 - Use browser/Web Speech voices for local playback.
 - Use bundled TTSReader server voices for cloud playback.
-- Track the website-style premium playback quota: `Used x / 5,000 chars for premium voices.`
 - Optionally use a TTSReader `UAPI-*` key, a temporary Bearer token, or Firebase refresh credentials for authenticated server playback.
 
 ## Installation
@@ -61,7 +60,9 @@ For authenticated server voices, use one of these credential options:
 - `Bearer eyJ...`: Uses the TTSReader cloud playback endpoint with the pasted bearer token.
 - `Firebase API key` + `Firebase refresh token`: Refreshes the short-lived cloud playback Bearer token automatically.
 
-Bearer and Firebase refresh tokens are not Cookies and should be treated like passwords. Cloud playback mirrors the website test/playback path and tracks premium usage locally against the 5,000 character limit shown in the UI.
+Bearer and Firebase refresh tokens are not Cookies and should be treated like passwords. Cloud playback mirrors the website test/playback path; account permissions and quota errors come from the TTSReader API response.
+
+The Basic voice list shows voices that the current Obsidian runtime can actually play. Some Basic voices shown on the TTSReader website, such as browser-provided Aria or Michelle voices, may not appear in Obsidian if Electron does not expose them through `speechSynthesis.getVoices()`.
 
 See [Firebase credentials](docs/firebase-credentials.md) for copy-paste Console snippets that extract the API key and refresh token from a signed-in TTSReader browser session.
 

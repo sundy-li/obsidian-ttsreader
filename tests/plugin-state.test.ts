@@ -8,18 +8,15 @@ import {
   chooseInitialVoiceId,
   filterVoicesForSelection,
   fingerprintCredential,
-  formatPremiumUsage,
   getBoundedCacheEntry,
   getCredentialKind,
   getCredentialParts,
   getVoiceDemoUrl,
-  getPremiumUsageAfterRead,
   getReadableText,
   groupVoicesByLanguage,
   mergeSettings,
   putBoundedCacheEntry,
   resolveServerCustomTextMode,
-  shouldCountPremiumUsage,
 } from "../src/plugin-state.js";
 
 describe("plugin state helpers", () => {
@@ -28,6 +25,7 @@ describe("plugin state helpers", () => {
       mergeSettings({ defaultRate: 1.25, preferredVoiceId: "voice-a" }),
       { ...DEFAULT_SETTINGS, defaultRate: 1.25, preferredVoiceId: "voice-a" },
     );
+    assert.equal("premiumCharsUsed" in DEFAULT_SETTINGS, false);
   });
 
   it("migrates old authorization fields into the unified credential", () => {
@@ -97,30 +95,6 @@ describe("plugin state helpers", () => {
       ),
       ["john", "olivia", "samantha"],
     );
-  });
-
-  it("tracks premium character usage against the website playback quota", () => {
-    assert.equal(formatPremiumUsage(424), "Used 424 / 5,000 chars for premium voices.");
-    assert.deepEqual(getPremiumUsageAfterRead(4900, "  hello world  "), {
-      used: 4911,
-      limit: 5000,
-      remaining: 89,
-      exceeded: false,
-    });
-    assert.deepEqual(getPremiumUsageAfterRead(4998, "hello"), {
-      used: 5003,
-      limit: 5000,
-      remaining: 0,
-      exceeded: true,
-    });
-  });
-
-  it("counts premium usage only when authenticated export can read custom server text", () => {
-    assert.equal(shouldCountPremiumUsage(true, "uapi-export"), true);
-    assert.equal(shouldCountPremiumUsage(true, "cloud-playback"), false);
-    assert.equal(shouldCountPremiumUsage(true, "cloud-playback", "cloud-bearer"), true);
-    assert.equal(shouldCountPremiumUsage(true, "cloud-playback", "firebase-refresh"), true);
-    assert.equal(shouldCountPremiumUsage(false, "uapi-export"), false);
   });
 
   it("requires UAPI export for custom text with TTSReader server voices", () => {
