@@ -28,6 +28,7 @@ import {
 } from "./plugin-state.js";
 
 const TTSREADER_SIGN_IN_URL = "https://ttsreader.com/player/";
+const FIREBASE_CREDENTIALS_GUIDE_URL = "https://github.com/sundy-li/obsidian-ttsreader/blob/main/docs/firebase-credentials.md";
 const ESTIMATED_SPEECH_CHARS_PER_SECOND = 13;
 
 export default class TtsReaderPlugin extends Plugin {
@@ -952,6 +953,12 @@ class TtsReaderSettingTab extends PluginSettingTab {
           .setButtonText("Show")
           .setTooltip("Show secret value")
           .onClick(() => toggleSecretInput(inputEl, button.buttonEl));
+      })
+      .addButton((button) => {
+        button
+          .setButtonText("Guide")
+          .setTooltip("Open Firebase credential guide")
+          .onClick(() => window.open(FIREBASE_CREDENTIALS_GUIDE_URL, "_blank", "noopener"));
       });
 
     let firebaseRefreshInputEl: HTMLInputElement | null = null;
@@ -980,6 +987,12 @@ class TtsReaderSettingTab extends PluginSettingTab {
           .setButtonText("Show")
           .setTooltip("Show secret value")
           .onClick(() => toggleSecretInput(inputEl, button.buttonEl));
+      })
+      .addButton((button) => {
+        button
+          .setButtonText("Guide")
+          .setTooltip("Open Firebase credential guide")
+          .onClick(() => window.open(FIREBASE_CREDENTIALS_GUIDE_URL, "_blank", "noopener"));
       });
 
     this.voices = await waitForVoices();

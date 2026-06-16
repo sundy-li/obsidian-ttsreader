@@ -63,6 +63,8 @@ For authenticated server voices, use one of these credential options:
 
 Bearer and Firebase refresh tokens are not Cookies and should be treated like passwords. Cloud playback mirrors the website test/playback path and tracks premium usage locally against the 5,000 character limit shown in the UI.
 
+See [Firebase credentials](docs/firebase-credentials.md) for copy-paste Console snippets that extract the API key and refresh token from a signed-in TTSReader browser session.
+
 ## Development
 
 ```bash
