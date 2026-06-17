@@ -1,5 +1,6 @@
 import type { TtsReaderVoice } from "./sdk.js";
 
+export type TtsProvider = "ttsreader" | "boson";
 export type VoiceFilter = "all" | "premium" | "basic";
 export type CredentialKind = "none" | "uapi-key" | "cloud-bearer" | "firebase-refresh";
 export type CloudCredentialKind = "none" | "cloud-bearer" | "firebase-refresh";
@@ -12,6 +13,8 @@ export interface TtsReaderPluginSettings {
   firebaseRefreshToken: string;
   firebaseAccessToken: string;
   firebaseAccessTokenExpiresAt: number;
+  bosonApiKey: string;
+  ttsProvider: TtsProvider;
   preferredVoiceId: string;
   preferredMode: "cloud-playback" | "uapi-export";
   defaultRate: number;
@@ -28,6 +31,8 @@ export const DEFAULT_SETTINGS: TtsReaderPluginSettings = {
   firebaseRefreshToken: "",
   firebaseAccessToken: "",
   firebaseAccessTokenExpiresAt: 0,
+  bosonApiKey: "",
+  ttsProvider: "ttsreader",
   preferredVoiceId: "",
   preferredMode: "cloud-playback",
   defaultRate: 1,
@@ -58,6 +63,7 @@ export interface VoiceSelectionFilter {
 }
 
 export interface AudioCacheKeyParts {
+  provider: TtsProvider;
   text: string;
   voiceId: string;
   lang: string;
@@ -167,6 +173,13 @@ export function filterVoicesForSelection(
   });
 }
 
+export function filterVoicesForProvider(voices: TtsReaderVoice[], provider: TtsProvider): TtsReaderVoice[] {
+  if (provider === "boson") {
+    return voices.filter((voice) => voice.source === "boson");
+  }
+  return voices.filter((voice) => voice.source === "browser" || voice.source === "ttsreader-server");
+}
+
 export function resolveServerCustomTextMode(
   mode: TtsReaderPluginSettings["preferredMode"],
   hasApiKey: boolean,
@@ -260,6 +273,7 @@ export function fingerprintCredential(value: string): string {
 
 export function buildAudioCacheKey(parts: AudioCacheKeyParts): string {
   return JSON.stringify({
+    provider: parts.provider,
     text: parts.text.trim(),
     voiceId: parts.voiceId,
     lang: parts.lang,

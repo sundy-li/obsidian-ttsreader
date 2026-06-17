@@ -1,8 +1,8 @@
 # Obsidian TTSReader
 
-Read Obsidian notes aloud with browser voices or TTSReader-style server voices.
+Read Obsidian notes aloud with browser voices, TTSReader server voices, or Boson Higgs Audio voices.
 
-This project contains an Obsidian desktop plugin plus a small TypeScript SDK for the TTSReader playback/export endpoints.
+This project contains an Obsidian desktop plugin plus a small TypeScript SDK for text-to-speech providers.
 
 ## Features
 
@@ -12,7 +12,9 @@ This project contains an Obsidian desktop plugin plus a small TypeScript SDK for
 - Play a sample from the voice picker before reading.
 - Use browser/Web Speech voices for local playback.
 - Use bundled TTSReader server voices for cloud playback.
+- Use Boson Higgs Audio TTS with the `higgs-audio-v3-tts` model.
 - Optionally use a TTSReader `UAPI-*` key, a temporary Bearer token, or Firebase refresh credentials for authenticated server playback.
+- Optionally use a Boson `bai-...` API key for Boson playback.
 
 ## Installation
 
@@ -48,13 +50,16 @@ styles.css -> <your vault>/.obsidian/plugins/ttsreader/styles.css
 - Open the ribbon icon or run `Open TTSReader`.
 - Select text and run `Read the selected text`.
 - Right-click selected editor text and choose `Read the selected text`.
+- Choose `TTSReader` or `Boson Higgs Audio` in settings or in the reader modal.
 - Use `Stop TTSReader playback` to stop audio.
 
-## Premium voices and sign-in
+## Providers and credentials
+
+### TTSReader
 
 The plugin can open the TTSReader sign-in page from settings, but Obsidian cannot read Google/Apple login cookies from your external browser session.
 
-For authenticated server voices, use one of these credential options:
+For authenticated TTSReader server voices, use one of these credential options:
 
 - `UAPI-...`: Uses the official TTSReader UAPI export path.
 - `Bearer eyJ...`: Uses the TTSReader cloud playback endpoint with the pasted bearer token.
@@ -65,6 +70,12 @@ Bearer and Firebase refresh tokens are not Cookies and should be treated like pa
 The Basic voice list shows voices that the current Obsidian runtime can actually play. Some Basic voices shown on the TTSReader website, such as browser-provided Aria or Michelle voices, may not appear in Obsidian if Electron does not expose them through `speechSynthesis.getVoices()`.
 
 See [Firebase credentials](docs/firebase-credentials.md) for copy-paste Console snippets that extract the API key and refresh token from a signed-in TTSReader browser session.
+
+### Boson Higgs Audio
+
+Select `Boson Higgs Audio` as the text-to-speech platform and paste a Boson API key into `Boson API key`.
+
+The plugin uses `POST https://api.boson.ai/v1/audio/speech` with model `higgs-audio-v3-tts`. The bundled Boson voice list is `chloe`, `eleanor`, `jake`, `marcus`, `nora`, and `oliver`.
 
 ## Development
 

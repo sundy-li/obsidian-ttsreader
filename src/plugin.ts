@@ -5,10 +5,12 @@ import { makeObsidianFetch } from "./obsidian-fetch.js";
 import {
   DEFAULT_SETTINGS,
   type VoiceFilter,
+  type TtsProvider,
   type TtsReaderPluginSettings,
   AUDIO_CACHE_LIMIT,
   buildAudioCacheKey,
   chooseInitialVoiceId,
+  filterVoicesForProvider,
   filterVoicesForSelection,
   fingerprintCredential,
   getBoundedCacheEntry,
@@ -131,10 +133,15 @@ export default class TtsReaderPlugin extends Plugin {
       return;
     }
 
-    await this.speak(text, voice.id, this.settings.defaultRate, this.settings.preferredMode);
+    await this.speak(text, voice.id, this.settings.defaultRate, this.settings.preferredMode, this.settings.ttsProvider);
   }
 
-  async playVoiceSample(voice: TtsReaderVoice, rate: number, mode: TtsReaderPluginSettings["preferredMode"]): Promise<void> {
+  async playVoiceSample(voice: TtsReaderVoice, rate: number, mode: TtsReaderPluginSettings["preferredMode"], provider = this.settings.ttsProvider): Promise<void> {
+    if (provider === "boson") {
+      await this.speakWithBosonVoice(`Hello, this is ${voice.name}.`, voice, rate, true);
+      return;
+    }
+
     const demoUrl = getVoiceDemoUrl(voice);
     if (demoUrl) {
       await this.playRemoteAudio(demoUrl);
@@ -151,7 +158,13 @@ export default class TtsReaderPlugin extends Plugin {
     await this.speakWithServerVoice(sampleText, voice, rate, "cloud-playback", true);
   }
 
-  async speak(text: string, voiceId: string, rate: number, mode: TtsReaderPluginSettings["preferredMode"]): Promise<void> {
+  async speak(
+    text: string,
+    voiceId: string,
+    rate: number,
+    mode: TtsReaderPluginSettings["preferredMode"],
+    provider = this.settings.ttsProvider,
+  ): Promise<void> {
     const trimmed = text.trim();
     if (!trimmed) {
       new Notice("TTSReader: no text to read.");
@@ -159,6 +172,17 @@ export default class TtsReaderPlugin extends Plugin {
     }
 
     this.stopPlayback();
+
+    if (provider === "boson") {
+      const voice = getAllVoices().find((candidate) => candidate.source === "boson" && candidate.id === voiceId);
+      if (!voice) {
+        const message = `Boson voice not found: ${voiceId}`;
+        this.showPlaybackError(message);
+        throw new Error(message);
+      }
+      await this.speakWithBosonVoice(trimmed, voice, rate, false);
+      return;
+    }
 
     if (!isServerVoice(voiceId)) {
       this.speakWithBrowserVoice(trimmed, voiceId, rate);
@@ -207,6 +231,7 @@ export default class TtsReaderPlugin extends Plugin {
       quality: "48khz_192kbps",
     } as const;
     const cacheKey = buildAudioCacheKey({
+      provider: "ttsreader",
       text,
       voiceId: voice.id,
       lang: voice.lang,
@@ -249,6 +274,43 @@ export default class TtsReaderPlugin extends Plugin {
           this.showPlaybackError(message);
           throw error;
         }
+      }
+      putBoundedCacheEntry(this.audioCache, cacheKey, audio, AUDIO_CACHE_LIMIT);
+    }
+
+    await this.playAudioBytes(audio.bytes, audio.contentType);
+  }
+
+  private async speakWithBosonVoice(text: string, voice: TtsReaderVoice, rate: number, isTest: boolean): Promise<void> {
+    this.stopPlayback();
+    const cacheKey = buildAudioCacheKey({
+      provider: "boson",
+      text,
+      voiceId: voice.id,
+      lang: voice.lang,
+      rate,
+      mode: "cloud-playback",
+      isTest,
+      credentialKind: this.settings.bosonApiKey ? "cloud-bearer" : "none",
+      credentialFingerprint: fingerprintCredential(this.settings.bosonApiKey),
+    });
+    const cachedAudio = getBoundedCacheEntry(this.audioCache, cacheKey);
+    let audio = cachedAudio;
+    if (!audio) {
+      try {
+        const client = new TtsReaderClient({
+          bosonApiKey: this.settings.bosonApiKey,
+          fetch: makeObsidianFetch(requestUrl),
+        });
+        audio = await client.synthesizeWithBoson({
+          text,
+          voiceId: voice.id,
+          rate,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.showPlaybackError(message);
+        throw error;
       }
       putBoundedCacheEntry(this.audioCache, cacheKey, audio, AUDIO_CACHE_LIMIT);
     }
@@ -381,16 +443,17 @@ export default class TtsReaderPlugin extends Plugin {
   }
 
   private chooseConfiguredVoice(voices: TtsReaderVoice[]): TtsReaderVoice | undefined {
-    const filtered = filterVoicesForSelection(voices, {
+    const providerVoices = filterVoicesForProvider(voices, this.settings.ttsProvider);
+    const filtered = filterVoicesForSelection(providerVoices, {
       languageCode: this.settings.preferredLanguageCode,
       accentCode: this.settings.preferredAccentCode,
       voiceFilter: this.settings.voiceFilter,
     });
     return (
       filtered.find((voice) => voice.id === this.settings.preferredVoiceId) ??
-      voices.find((voice) => voice.id === this.settings.preferredVoiceId) ??
+      providerVoices.find((voice) => voice.id === this.settings.preferredVoiceId) ??
       filtered[0] ??
-      voices[0]
+      providerVoices[0]
     );
   }
 
@@ -506,6 +569,16 @@ function isAuthorizationError(message: string): boolean {
   return /\b(401|403)\b/.test(message) || /auth|token|permission|unauthori[sz]ed|forbidden/i.test(message);
 }
 
+function getVoiceSourceLabel(voice: TtsReaderVoice): string {
+  if (voice.source === "browser") {
+    return "Browser";
+  }
+  if (voice.source === "boson") {
+    return "Boson";
+  }
+  return "TTSReader";
+}
+
 function validateFirebaseRefreshCredentials(apiKey: string, refreshToken: string): void {
   if (!apiKey.startsWith("AIza")) {
     throw new Error("Firebase API key should start with AIza. Copy value.apiKey from the TTSReader Firebase auth record.");
@@ -582,6 +655,7 @@ class TtsReaderModal extends Modal {
   private readonly plugin: TtsReaderPlugin;
   private readonly initialText: string;
   private textArea!: HTMLTextAreaElement;
+  private providerSelect!: HTMLSelectElement;
   private languageSelect!: HTMLSelectElement;
   private accentSelect!: HTMLSelectElement;
   private voiceSelect!: HTMLSelectElement;
@@ -612,6 +686,23 @@ class TtsReaderModal extends Modal {
     this.textArea = wrapper.createEl("textarea");
     this.textArea.value = this.initialText;
     this.textArea.placeholder = "Text to speech";
+
+    const providerRow = wrapper.createDiv({ cls: "ttsreader-plugin-row" });
+    providerRow.createEl("label", { text: "Platform" });
+    this.providerSelect = providerRow.createEl("select");
+    this.providerSelect.createEl("option", { value: "ttsreader", text: "TTSReader" });
+    this.providerSelect.createEl("option", { value: "boson", text: "Boson Higgs Audio" });
+    this.providerSelect.value = this.plugin.settings.ttsProvider;
+    this.providerSelect.addEventListener("change", async () => {
+      this.plugin.settings.ttsProvider = this.providerSelect.value as TtsProvider;
+      this.plugin.settings.voiceFilter = "all";
+      this.voiceFilter = "all";
+      await this.plugin.saveSettings();
+      this.languageGroups = groupVoicesByLanguage(this.getProviderVoices());
+      this.populateLanguageSelect();
+      this.populateAccentSelect();
+      this.populateVoiceSelect();
+    });
 
     const credentialRow = wrapper.createDiv({ cls: "ttsreader-plugin-row" });
     credentialRow.createEl("label", { text: "Authorization / UAPI Key" });
@@ -650,16 +741,20 @@ class TtsReaderModal extends Modal {
     });
     addSecretVisibilityButton(firebaseRefreshInput, firebaseRefreshRow);
 
+    const bosonApiKeyRow = wrapper.createDiv({ cls: "ttsreader-plugin-row" });
+    bosonApiKeyRow.createEl("label", { text: "Boson API key" });
+    const bosonApiKeyInput = bosonApiKeyRow.createEl("input", { type: "password" });
+    bosonApiKeyInput.placeholder = "bai-...";
+    bosonApiKeyInput.value = this.plugin.settings.bosonApiKey;
+    bosonApiKeyInput.addEventListener("change", async () => {
+      this.plugin.settings.bosonApiKey = normalizeCredential(bosonApiKeyInput.value);
+      await this.plugin.saveSettings();
+    });
+    addSecretVisibilityButton(bosonApiKeyInput, bosonApiKeyRow);
+
     const languageRow = wrapper.createDiv({ cls: "ttsreader-plugin-row" });
     languageRow.createEl("label", { text: "Reading Language" });
     this.languageSelect = languageRow.createEl("select");
-    for (const group of this.languageGroups) {
-      this.languageSelect.createEl("option", {
-        value: group.languageCode,
-        text: `${group.flag} ${group.name}`.trim(),
-      });
-    }
-    this.languageSelect.value = this.chooseLanguageCode();
     this.languageSelect.addEventListener("change", () => {
       this.plugin.settings.preferredLanguageCode = this.languageSelect.value;
       this.plugin.settings.preferredAccentCode = "";
@@ -732,6 +827,7 @@ class TtsReaderModal extends Modal {
     stopButton.addEventListener("click", () => this.plugin.stopPlayback());
 
     this.statusEl = wrapper.createDiv({ cls: "ttsreader-plugin-status" });
+    this.populateLanguageSelect();
     this.populateAccentSelect();
     this.populateVoiceSelect();
   }
@@ -744,16 +840,18 @@ class TtsReaderModal extends Modal {
     this.statusEl.setText("Preparing audio...");
     try {
       const voiceId = this.voiceSelect.value;
+      const provider = this.providerSelect.value as TtsProvider;
       const mode = this.modeSelect.value as TtsReaderPluginSettings["preferredMode"];
       const rate = Number(this.rateInput.value) || 1;
       this.plugin.settings.preferredVoiceId = voiceId;
+      this.plugin.settings.ttsProvider = provider;
       this.plugin.settings.preferredMode = mode;
       this.plugin.settings.defaultRate = rate;
       this.plugin.settings.preferredLanguageCode = this.languageSelect.value;
       this.plugin.settings.preferredAccentCode = this.accentSelect.value;
       this.plugin.settings.voiceFilter = this.voiceFilter;
       await this.plugin.saveSettings();
-      await this.plugin.speak(this.textArea.value, voiceId, rate, mode);
+      await this.plugin.speak(this.textArea.value, voiceId, rate, mode, provider);
       this.statusEl.setText("Playing");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -774,6 +872,7 @@ class TtsReaderModal extends Modal {
         voice,
         Number(this.rateInput.value) || 1,
         this.modeSelect.value as TtsReaderPluginSettings["preferredMode"],
+        this.providerSelect.value as TtsProvider,
       );
       this.statusEl.setText("Playing sample");
     } catch (error) {
@@ -790,6 +889,22 @@ class TtsReaderModal extends Modal {
     }
 
     return this.languageGroups[0]?.languageCode ?? "";
+  }
+
+  private getProviderVoices(): TtsReaderVoice[] {
+    return filterVoicesForProvider(this.voices, this.plugin.settings.ttsProvider);
+  }
+
+  private populateLanguageSelect(): void {
+    this.languageSelect.empty();
+    this.languageGroups = groupVoicesByLanguage(this.getProviderVoices());
+    for (const group of this.languageGroups) {
+      this.languageSelect.createEl("option", {
+        value: group.languageCode,
+        text: `${group.flag} ${group.name}`.trim(),
+      });
+    }
+    this.languageSelect.value = this.chooseLanguageCode();
   }
 
   private populateAccentSelect(): void {
@@ -809,7 +924,8 @@ class TtsReaderModal extends Modal {
 
   private populateVoiceSelect(): void {
     this.voiceSelect.empty();
-    const filtered = filterVoicesForSelection(this.voices, {
+    const providerVoices = this.getProviderVoices();
+    const filtered = filterVoicesForSelection(providerVoices, {
       languageCode: this.languageSelect.value,
       accentCode: this.accentSelect.value,
       voiceFilter: this.voiceFilter,
@@ -818,14 +934,14 @@ class TtsReaderModal extends Modal {
 
     for (const voice of filtered) {
       const badge = voice.isPremium ? "Premium" : "Basic";
-      const source = voice.source === "browser" ? "Browser" : "TTSReader";
+      const source = getVoiceSourceLabel(voice);
       const label = `${voice.name} (${badge}, ${source})`;
       this.voiceSelect.createEl("option", { value: voice.id, text: label });
     }
 
     this.voiceSelect.value = selectedVoiceId;
     this.sampleButton.disabled = !selectedVoiceId;
-    this.statusEl.setText(`${filtered.length} of ${this.voices.length} voices shown`);
+    this.statusEl.setText(`${filtered.length} of ${providerVoices.length} voices shown`);
   }
 }
 
@@ -847,6 +963,22 @@ class TtsReaderSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.createEl("h2", { text: "TTSReader" });
+
+    new Setting(containerEl)
+      .setName("Text-to-speech platform")
+      .setDesc("Choose which provider and voice list to use.")
+      .addDropdown((dropdown) => {
+        dropdown
+          .addOption("ttsreader", "TTSReader")
+          .addOption("boson", "Boson Higgs Audio")
+          .setValue(this.plugin.settings.ttsProvider)
+          .onChange(async (value) => {
+            this.plugin.settings.ttsProvider = value as TtsProvider;
+            this.plugin.settings.voiceFilter = "all";
+            await this.plugin.saveSettings();
+            this.display();
+          });
+      });
 
     let credentialInputEl: HTMLInputElement | null = null;
     new Setting(containerEl)
@@ -942,11 +1074,38 @@ class TtsReaderSettingTab extends PluginSettingTab {
           .onClick(() => window.open(FIREBASE_CREDENTIALS_GUIDE_URL, "_blank", "noopener"));
       });
 
+    let bosonApiKeyInputEl: HTMLInputElement | null = null;
+    new Setting(containerEl)
+      .setName("Boson API key")
+      .setDesc("Use a Boson API key for Higgs Audio TTS. Keys usually start with bai-.")
+      .addText((text) => {
+        text
+          .setPlaceholder("bai-...")
+          .setValue(this.plugin.settings.bosonApiKey)
+          .onChange(async (value) => {
+            this.plugin.settings.bosonApiKey = normalizeCredential(value);
+            await this.plugin.saveSettings();
+          });
+        text.inputEl.type = "password";
+        bosonApiKeyInputEl = text.inputEl;
+      })
+      .addButton((button) => {
+        if (!bosonApiKeyInputEl) {
+          return;
+        }
+        const inputEl = bosonApiKeyInputEl;
+        button
+          .setButtonText("Show")
+          .setTooltip("Show secret value")
+          .onClick(() => toggleSecretInput(inputEl, button.buttonEl));
+      });
+
     this.voices = await waitForVoices();
-    this.languageGroups = groupVoicesByLanguage(this.voices);
+    const providerVoices = filterVoicesForProvider(this.voices, this.plugin.settings.ttsProvider);
+    this.languageGroups = groupVoicesByLanguage(providerVoices);
     const languageCode = this.chooseLanguageCode();
     const accentCode = this.chooseAccentCode(languageCode);
-    const filteredVoices = filterVoicesForSelection(this.voices, {
+    const filteredVoices = filterVoicesForSelection(providerVoices, {
       languageCode,
       accentCode,
       voiceFilter: this.plugin.settings.voiceFilter,
@@ -998,11 +1157,11 @@ class TtsReaderSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Reader")
-      .setDesc(`${filteredVoices.length} of ${this.voices.length} voices shown`)
+      .setDesc(`${filteredVoices.length} of ${providerVoices.length} voices shown`)
       .addDropdown((dropdown) => {
         for (const voice of filteredVoices) {
           const badge = voice.isPremium ? "Premium" : "Basic";
-          const source = voice.source === "browser" ? "Browser" : "TTSReader";
+          const source = getVoiceSourceLabel(voice);
           dropdown.addOption(voice.id, `${voice.name} (${badge}, ${source})`);
         }
         dropdown.setValue(selectedVoiceId).onChange(async (value) => {
@@ -1015,8 +1174,8 @@ class TtsReaderSettingTab extends PluginSettingTab {
           .setButtonText("Play sample")
           .setDisabled(!selectedVoiceId)
           .onClick(async () => {
-            const voice = this.voices.find((candidate) => candidate.id === this.plugin.settings.preferredVoiceId) ??
-              this.voices.find((candidate) => candidate.id === selectedVoiceId);
+            const voice = providerVoices.find((candidate) => candidate.id === this.plugin.settings.preferredVoiceId) ??
+              providerVoices.find((candidate) => candidate.id === selectedVoiceId);
             if (!voice) {
               new Notice("TTSReader: no voice selected.");
               return;
@@ -1026,6 +1185,7 @@ class TtsReaderSettingTab extends PluginSettingTab {
                 voice,
                 this.plugin.settings.defaultRate,
                 this.plugin.settings.preferredMode,
+                this.plugin.settings.ttsProvider,
               );
             } catch (error) {
               const message = error instanceof Error ? error.message : String(error);
@@ -1036,7 +1196,7 @@ class TtsReaderSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Default server mode")
-      .setDesc("UAPI export uses the selected TTSReader voice for custom text. Cloud playback can preview samples.")
+      .setDesc("Only used by TTSReader voices. Boson always uses Higgs Audio cloud playback.")
       .addDropdown((dropdown) => {
         dropdown
           .addOption("cloud-playback", "Cloud playback")
@@ -1097,6 +1257,10 @@ async function waitForVoices(): Promise<TtsReaderVoice[]> {
 function getServerAndBrowserVoices(browserVoices?: SpeechSynthesisVoice[]): TtsReaderVoice[] {
   const client = new TtsReaderClient();
   return client.listVoices(browserVoices);
+}
+
+function getAllVoices(): TtsReaderVoice[] {
+  return getServerAndBrowserVoices();
 }
 
 async function waitForBrowserVoices(): Promise<SpeechSynthesisVoice[]> {

@@ -1,6 +1,6 @@
 import { TTSREADER_SERVER_VOICES } from "./ttsreader-voices.generated.js";
 
-export type TtsReaderVoiceSource = "browser" | "ttsreader-server";
+export type TtsReaderVoiceSource = "browser" | "ttsreader-server" | "boson";
 
 export interface TtsReaderVoice {
   id: string;
@@ -22,9 +22,11 @@ export interface TtsReaderAudio {
 export interface TtsReaderClientOptions {
   apiKey?: string;
   cloudBearerToken?: string;
+  bosonApiKey?: string;
   fetch?: typeof fetch;
   cloudPlaybackEndpoint?: string;
   uapiEndpoint?: string;
+  bosonEndpoint?: string;
 }
 
 export interface FirebaseTokenRefreshOptions {
@@ -52,7 +54,17 @@ export interface SynthesizeOptions {
 
 const DEFAULT_CLOUD_PLAYBACK_ENDPOINT = "https://us-central1-ttsreader.cloudfunctions.net/tts";
 const DEFAULT_UAPI_ENDPOINT = "https://ttsreader.com/api/ttsSync";
+const DEFAULT_BOSON_SPEECH_ENDPOINT = "https://api.boson.ai/v1/audio/speech";
 const DEFAULT_FIREBASE_REFRESH_ENDPOINT = "https://securetoken.googleapis.com/v1/token";
+
+const BOSON_VOICES = [
+  { id: "chloe", name: "Chloe", gender: "f" },
+  { id: "eleanor", name: "Eleanor", gender: "f" },
+  { id: "jake", name: "Jake", gender: "m" },
+  { id: "marcus", name: "Marcus", gender: "m" },
+  { id: "nora", name: "Nora", gender: "f" },
+  { id: "oliver", name: "Oliver", gender: "m" },
+] as const;
 
 export function getBundledServerVoices(): TtsReaderVoice[] {
   return TTSREADER_SERVER_VOICES.map((voice) => ({
@@ -64,6 +76,17 @@ export function getBundledServerVoices(): TtsReaderVoice[] {
     premiumLevel: voice.premiumLevel,
     gender: voice.gender,
     demo: "demo" in voice ? voice.demo : undefined,
+  }));
+}
+
+export function getBosonVoices(): TtsReaderVoice[] {
+  return BOSON_VOICES.map((voice) => ({
+    id: voice.id,
+    name: voice.name,
+    lang: "en-US",
+    source: "boson",
+    isPremium: false,
+    gender: voice.gender,
   }));
 }
 
@@ -104,20 +127,24 @@ function normalizeBearerToken(token: string): string {
 export class TtsReaderClient {
   private readonly apiKey?: string;
   private readonly cloudBearerToken: string;
+  private readonly bosonApiKey: string;
   private readonly fetcher: typeof fetch;
   private readonly cloudPlaybackEndpoint: string;
   private readonly uapiEndpoint: string;
+  private readonly bosonEndpoint: string;
 
   constructor(options: TtsReaderClientOptions = {}) {
     this.apiKey = options.apiKey;
     this.cloudBearerToken = normalizeBearerToken(options.cloudBearerToken ?? "");
+    this.bosonApiKey = normalizeBearerToken(options.bosonApiKey ?? "");
     this.fetcher = options.fetch ?? fetch.bind(globalThis);
     this.cloudPlaybackEndpoint = options.cloudPlaybackEndpoint ?? DEFAULT_CLOUD_PLAYBACK_ENDPOINT;
     this.uapiEndpoint = options.uapiEndpoint ?? DEFAULT_UAPI_ENDPOINT;
+    this.bosonEndpoint = options.bosonEndpoint ?? DEFAULT_BOSON_SPEECH_ENDPOINT;
   }
 
   listVoices(browserVoices?: SpeechSynthesisVoice[]): TtsReaderVoice[] {
-    return [...getBrowserVoices(browserVoices), ...getBundledServerVoices()];
+    return [...getBrowserVoices(browserVoices), ...getBundledServerVoices(), ...getBosonVoices()];
   }
 
   async synthesize(options: SynthesizeOptions): Promise<TtsReaderAudio> {
@@ -172,6 +199,32 @@ export class TtsReaderClient {
     });
 
     return readAudioResponse(response, "TTSReader UAPI export request failed");
+  }
+
+  async synthesizeWithBoson(options: Pick<SynthesizeOptions, "text" | "voiceId" | "rate">): Promise<TtsReaderAudio> {
+    if (!options.text.trim()) {
+      throw new Error("Cannot synthesize empty text.");
+    }
+    if (!this.bosonApiKey) {
+      throw new Error("Boson Higgs Audio TTS requires a Boson API key.");
+    }
+
+    const response = await this.fetcher(this.bosonEndpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.bosonApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "higgs-audio-v3-tts",
+        input: options.text,
+        voice: options.voiceId,
+        response_format: "wav",
+        speed: normalizeRate(options.rate),
+      }),
+    });
+
+    return readAudioResponse(response, "Boson Higgs Audio TTS request failed");
   }
 }
 

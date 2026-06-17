@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   TtsReaderClient,
+  getBosonVoices,
   getBundledServerVoices,
   getBrowserVoices,
   isServerVoice,
@@ -11,6 +12,17 @@ import {
 } from "../src/sdk.js";
 
 describe("TTSReader SDK", () => {
+  it("exposes Boson Higgs Audio voices as server voices", () => {
+    const voices = getBosonVoices();
+
+    assert.deepEqual(
+      voices.map((voice) => voice.id),
+      ["chloe", "eleanor", "jake", "marcus", "nora", "oliver"],
+    );
+    assert.ok(voices.every((voice) => voice.source === "boson"));
+    assert.ok(voices.every((voice) => voice.isPremium === false));
+  });
+
   it("exposes bundled server voices with paid/free metadata", () => {
     const voices = getBundledServerVoices();
 
@@ -196,6 +208,37 @@ describe("TTSReader SDK", () => {
       quality: "48khz_192kbps",
     });
   });
+
+  it("builds the Boson Higgs Audio speech request", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fetcher: typeof fetch = async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(new Uint8Array([9, 8, 7]), {
+        status: 200,
+        headers: { "content-type": "audio/wav" },
+      });
+    };
+    const client = new TtsReaderClient({ bosonApiKey: "bai-test", fetch: fetcher });
+
+    const audio = await client.synthesizeWithBoson({
+      text: "Hello from Boson",
+      voiceId: "chloe",
+      rate: 1.2,
+    });
+
+    assert.equal(audio.contentType, "audio/wav");
+    assert.equal(audio.bytes.byteLength, 3);
+    assert.equal(calls[0].url, "https://api.boson.ai/v1/audio/speech");
+    assert.equal(new Headers(calls[0].init.headers).get("authorization"), "Bearer bai-test");
+    assert.deepEqual(JSON.parse(String(calls[0].init.body)), {
+      model: "higgs-audio-v3-tts",
+      input: "Hello from Boson",
+      voice: "chloe",
+      response_format: "wav",
+      speed: 1.2,
+    });
+  });
+
 
   it("refreshes a Firebase ID token with a refresh token", async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];

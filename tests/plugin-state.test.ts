@@ -6,6 +6,7 @@ import {
   AUDIO_CACHE_LIMIT,
   buildAudioCacheKey,
   chooseInitialVoiceId,
+  filterVoicesForProvider,
   filterVoicesForSelection,
   fingerprintCredential,
   getBoundedCacheEntry,
@@ -26,6 +27,7 @@ describe("plugin state helpers", () => {
       { ...DEFAULT_SETTINGS, defaultRate: 1.25, preferredVoiceId: "voice-a" },
     );
     assert.equal("premiumCharsUsed" in DEFAULT_SETTINGS, false);
+    assert.equal(DEFAULT_SETTINGS.ttsProvider, "ttsreader");
   });
 
   it("migrates old authorization fields into the unified credential", () => {
@@ -97,6 +99,21 @@ describe("plugin state helpers", () => {
     );
   });
 
+  it("filters voices by selected provider without inventing unavailable browser voices", () => {
+    const voices = [
+      { id: "samantha", name: "Samantha", lang: "en-US", source: "browser" as const, isPremium: false },
+      { id: "ttsreaderServer.azure.en-US-AriaNeural", name: "Aria Premium", lang: "en-US", source: "ttsreader-server" as const, isPremium: true },
+      { id: "chloe", name: "Chloe", lang: "en-US", source: "boson" as const, isPremium: false },
+    ];
+
+    assert.deepEqual(filterVoicesForProvider(voices, "ttsreader").map((voice) => voice.id), [
+      "samantha",
+      "ttsreaderServer.azure.en-US-AriaNeural",
+    ]);
+    assert.deepEqual(filterVoicesForProvider(voices, "boson").map((voice) => voice.id), ["chloe"]);
+    assert.equal(filterVoicesForProvider(voices, "ttsreader").some((voice) => voice.id.includes("Microsoft Aria Online")), false);
+  });
+
   it("requires UAPI export for custom text with TTSReader server voices", () => {
     assert.equal(resolveServerCustomTextMode("cloud-playback", false), "");
     assert.equal(resolveServerCustomTextMode("cloud-playback", true), "uapi-export");
@@ -135,6 +152,7 @@ describe("plugin state helpers", () => {
 
   it("builds stable audio cache keys with authorization fingerprints", () => {
     const key = buildAudioCacheKey({
+      provider: "ttsreader",
       text: "  Hello  ",
       voiceId: "voice-a",
       lang: "en-US",
@@ -146,6 +164,18 @@ describe("plugin state helpers", () => {
     });
 
     assert.equal(key, buildAudioCacheKey({
+      provider: "ttsreader",
+      text: "Hello",
+      voiceId: "voice-a",
+      lang: "en-US",
+      rate: 1,
+      mode: "cloud-playback",
+      isTest: false,
+      credentialKind: "cloud-bearer",
+      credentialFingerprint: fingerprintCredential("secret-token"),
+    }));
+    assert.notEqual(key, buildAudioCacheKey({
+      provider: "boson",
       text: "Hello",
       voiceId: "voice-a",
       lang: "en-US",
