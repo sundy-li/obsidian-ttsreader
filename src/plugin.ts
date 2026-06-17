@@ -27,6 +27,7 @@ import {
 
 const TTSREADER_SIGN_IN_URL = "https://ttsreader.com/player/";
 const FIREBASE_CREDENTIALS_GUIDE_URL = "https://github.com/sundy-li/obsidian-ttsreader/blob/main/docs/firebase-credentials.md";
+const BOSON_API_KEY_GUIDE_URL = "https://www.boson.ai/workspace/api-key";
 const ESTIMATED_SPEECH_CHARS_PER_SECOND = 13;
 
 function showCredentialRowsForProvider(
@@ -768,6 +769,10 @@ class TtsReaderModal extends Modal {
       await this.plugin.saveSettings();
     });
     addSecretVisibilityButton(bosonApiKeyInput, bosonApiKeyRow);
+    const bosonApiKeyGuideButton = bosonApiKeyRow.createEl("button", { text: "Guide" });
+    bosonApiKeyGuideButton.addEventListener("click", () => {
+      window.open(BOSON_API_KEY_GUIDE_URL, "_blank", "noopener");
+    });
 
     credentialRows = {
       ttsreader: [credentialRow, firebaseApiKeyRow, firebaseRefreshRow],
@@ -1124,6 +1129,12 @@ class TtsReaderSettingTab extends PluginSettingTab {
             .setButtonText("Show")
             .setTooltip("Show secret value")
             .onClick(() => toggleSecretInput(inputEl, button.buttonEl));
+        })
+        .addButton((button) => {
+          button
+            .setButtonText("Guide")
+            .setTooltip("Open Boson API key page")
+            .onClick(() => window.open(BOSON_API_KEY_GUIDE_URL, "_blank", "noopener"));
         });
     }
 
