@@ -32,7 +32,7 @@ export const DEFAULT_SETTINGS: TtsReaderPluginSettings = {
   firebaseAccessToken: "",
   firebaseAccessTokenExpiresAt: 0,
   bosonApiKey: "",
-  ttsProvider: "ttsreader",
+  ttsProvider: "boson",
   preferredVoiceId: "",
   preferredMode: "cloud-playback",
   defaultRate: 1,

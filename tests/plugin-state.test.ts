@@ -27,7 +27,7 @@ describe("plugin state helpers", () => {
       { ...DEFAULT_SETTINGS, defaultRate: 1.25, preferredVoiceId: "voice-a" },
     );
     assert.equal("premiumCharsUsed" in DEFAULT_SETTINGS, false);
-    assert.equal(DEFAULT_SETTINGS.ttsProvider, "ttsreader");
+    assert.equal(DEFAULT_SETTINGS.ttsProvider, "boson");
   });
 
   it("migrates old authorization fields into the unified credential", () => {

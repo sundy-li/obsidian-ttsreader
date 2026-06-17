@@ -703,8 +703,8 @@ class TtsReaderModal extends Modal {
     const providerRow = wrapper.createDiv({ cls: "ttsreader-plugin-row" });
     providerRow.createEl("label", { text: "Platform" });
     this.providerSelect = providerRow.createEl("select");
-    this.providerSelect.createEl("option", { value: "ttsreader", text: "TTSReader" });
     this.providerSelect.createEl("option", { value: "boson", text: "Boson Higgs Audio" });
+    this.providerSelect.createEl("option", { value: "ttsreader", text: "TTSReader" });
     this.providerSelect.value = this.plugin.settings.ttsProvider;
     let credentialRows: { ttsreader: HTMLElement[]; boson: HTMLElement[] } | null = null;
     this.providerSelect.addEventListener("change", async () => {
@@ -992,8 +992,8 @@ class TtsReaderSettingTab extends PluginSettingTab {
       .setDesc("Choose which provider and voice list to use.")
       .addDropdown((dropdown) => {
         dropdown
-          .addOption("ttsreader", "TTSReader")
           .addOption("boson", "Boson Higgs Audio")
+          .addOption("ttsreader", "TTSReader")
           .setValue(this.plugin.settings.ttsProvider)
           .onChange(async (value) => {
             this.plugin.settings.ttsProvider = value as TtsProvider;
