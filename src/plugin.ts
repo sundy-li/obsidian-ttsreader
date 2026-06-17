@@ -29,6 +29,19 @@ const TTSREADER_SIGN_IN_URL = "https://ttsreader.com/player/";
 const FIREBASE_CREDENTIALS_GUIDE_URL = "https://github.com/sundy-li/obsidian-ttsreader/blob/main/docs/firebase-credentials.md";
 const ESTIMATED_SPEECH_CHARS_PER_SECOND = 13;
 
+function showCredentialRowsForProvider(
+  provider: TtsProvider,
+  rows: { ttsreader: HTMLElement[]; boson: HTMLElement[] },
+): void {
+  const showTtsReaderRows = provider === "ttsreader";
+  for (const row of rows.ttsreader) {
+    row.style.display = showTtsReaderRows ? "" : "none";
+  }
+  for (const row of rows.boson) {
+    row.style.display = showTtsReaderRows ? "none" : "";
+  }
+}
+
 export default class TtsReaderPlugin extends Plugin {
   settings: TtsReaderPluginSettings = DEFAULT_SETTINGS;
   private currentAudio: HTMLAudioElement | null = null;
@@ -693,11 +706,15 @@ class TtsReaderModal extends Modal {
     this.providerSelect.createEl("option", { value: "ttsreader", text: "TTSReader" });
     this.providerSelect.createEl("option", { value: "boson", text: "Boson Higgs Audio" });
     this.providerSelect.value = this.plugin.settings.ttsProvider;
+    let credentialRows: { ttsreader: HTMLElement[]; boson: HTMLElement[] } | null = null;
     this.providerSelect.addEventListener("change", async () => {
       this.plugin.settings.ttsProvider = this.providerSelect.value as TtsProvider;
       this.plugin.settings.voiceFilter = "all";
       this.voiceFilter = "all";
       await this.plugin.saveSettings();
+      if (credentialRows) {
+        showCredentialRowsForProvider(this.plugin.settings.ttsProvider, credentialRows);
+      }
       this.languageGroups = groupVoicesByLanguage(this.getProviderVoices());
       this.populateLanguageSelect();
       this.populateAccentSelect();
@@ -751,6 +768,12 @@ class TtsReaderModal extends Modal {
       await this.plugin.saveSettings();
     });
     addSecretVisibilityButton(bosonApiKeyInput, bosonApiKeyRow);
+
+    credentialRows = {
+      ttsreader: [credentialRow, firebaseApiKeyRow, firebaseRefreshRow],
+      boson: [bosonApiKeyRow],
+    };
+    showCredentialRowsForProvider(this.plugin.settings.ttsProvider, credentialRows);
 
     const languageRow = wrapper.createDiv({ cls: "ttsreader-plugin-row" });
     languageRow.createEl("label", { text: "Reading Language" });
@@ -980,125 +1003,129 @@ class TtsReaderSettingTab extends PluginSettingTab {
           });
       });
 
-    let credentialInputEl: HTMLInputElement | null = null;
-    new Setting(containerEl)
-      .setName("Authorization / UAPI Key")
-      .setDesc("Paste a UAPI key, or paste a short-lived Authorization Bearer token. Firebase credentials below are preferred for cloud playback because the plugin can refresh them.")
-      .addText((text) => {
-        text
-          .setPlaceholder("UAPI-... or Bearer eyJ...")
-          .setValue(this.plugin.settings.credential)
-          .onChange(async (value) => {
-            this.plugin.settings.credential = normalizeCredential(value);
-            await this.plugin.saveSettings();
-          });
-        text.inputEl.type = "password";
-        credentialInputEl = text.inputEl;
-      })
-      .addButton((button) => {
-        if (!credentialInputEl) {
-          return;
-        }
-        const inputEl = credentialInputEl;
-        button
-          .setButtonText("Show")
-          .setTooltip("Show secret value")
-          .onClick(() => toggleSecretInput(inputEl, button.buttonEl));
-      });
+    if (this.plugin.settings.ttsProvider === "ttsreader") {
+      let credentialInputEl: HTMLInputElement | null = null;
+      new Setting(containerEl)
+        .setName("Authorization / UAPI Key")
+        .setDesc("Paste a UAPI key, or paste a short-lived Authorization Bearer token. Firebase credentials below are preferred for cloud playback because the plugin can refresh them.")
+        .addText((text) => {
+          text
+            .setPlaceholder("UAPI-... or Bearer eyJ...")
+            .setValue(this.plugin.settings.credential)
+            .onChange(async (value) => {
+              this.plugin.settings.credential = normalizeCredential(value);
+              await this.plugin.saveSettings();
+            });
+          text.inputEl.type = "password";
+          credentialInputEl = text.inputEl;
+        })
+        .addButton((button) => {
+          if (!credentialInputEl) {
+            return;
+          }
+          const inputEl = credentialInputEl;
+          button
+            .setButtonText("Show")
+            .setTooltip("Show secret value")
+            .onClick(() => toggleSecretInput(inputEl, button.buttonEl));
+        });
 
-    let firebaseApiKeyInputEl: HTMLInputElement | null = null;
-    new Setting(containerEl)
-      .setName("Firebase API key")
-      .setDesc("Use the apiKey from the TTSReader Firebase auth record.")
-      .addText((text) => {
-        text
-          .setPlaceholder("AIza...")
-          .setValue(this.plugin.settings.firebaseApiKey)
-          .onChange(async (value) => {
-            this.plugin.settings.firebaseApiKey = normalizeCredential(value);
-            this.plugin.settings.firebaseAccessToken = "";
-            this.plugin.settings.firebaseAccessTokenExpiresAt = 0;
-            await this.plugin.saveSettings();
-          });
-        text.inputEl.type = "password";
-        firebaseApiKeyInputEl = text.inputEl;
-      })
-      .addButton((button) => {
-        if (!firebaseApiKeyInputEl) {
-          return;
-        }
-        const inputEl = firebaseApiKeyInputEl;
-        button
-          .setButtonText("Show")
-          .setTooltip("Show secret value")
-          .onClick(() => toggleSecretInput(inputEl, button.buttonEl));
-      })
-      .addButton((button) => {
-        button
-          .setButtonText("Guide")
-          .setTooltip("Open Firebase credential guide")
-          .onClick(() => window.open(FIREBASE_CREDENTIALS_GUIDE_URL, "_blank", "noopener"));
-      });
+      let firebaseApiKeyInputEl: HTMLInputElement | null = null;
+      new Setting(containerEl)
+        .setName("Firebase API key")
+        .setDesc("Use the apiKey from the TTSReader Firebase auth record.")
+        .addText((text) => {
+          text
+            .setPlaceholder("AIza...")
+            .setValue(this.plugin.settings.firebaseApiKey)
+            .onChange(async (value) => {
+              this.plugin.settings.firebaseApiKey = normalizeCredential(value);
+              this.plugin.settings.firebaseAccessToken = "";
+              this.plugin.settings.firebaseAccessTokenExpiresAt = 0;
+              await this.plugin.saveSettings();
+            });
+          text.inputEl.type = "password";
+          firebaseApiKeyInputEl = text.inputEl;
+        })
+        .addButton((button) => {
+          if (!firebaseApiKeyInputEl) {
+            return;
+          }
+          const inputEl = firebaseApiKeyInputEl;
+          button
+            .setButtonText("Show")
+            .setTooltip("Show secret value")
+            .onClick(() => toggleSecretInput(inputEl, button.buttonEl));
+        })
+        .addButton((button) => {
+          button
+            .setButtonText("Guide")
+            .setTooltip("Open Firebase credential guide")
+            .onClick(() => window.open(FIREBASE_CREDENTIALS_GUIDE_URL, "_blank", "noopener"));
+        });
 
-    let firebaseRefreshInputEl: HTMLInputElement | null = null;
-    new Setting(containerEl)
-      .setName("Firebase refresh token")
-      .setDesc("Use stsTokenManager.refreshToken from the TTSReader Firebase auth record. Treat it like a password.")
-      .addText((text) => {
-        text
-          .setPlaceholder("AMf-vB...")
-          .setValue(this.plugin.settings.firebaseRefreshToken)
-          .onChange(async (value) => {
-            this.plugin.settings.firebaseRefreshToken = normalizeCredential(value);
-            this.plugin.settings.firebaseAccessToken = "";
-            this.plugin.settings.firebaseAccessTokenExpiresAt = 0;
-            await this.plugin.saveSettings();
-          });
-        text.inputEl.type = "password";
-        firebaseRefreshInputEl = text.inputEl;
-      })
-      .addButton((button) => {
-        if (!firebaseRefreshInputEl) {
-          return;
-        }
-        const inputEl = firebaseRefreshInputEl;
-        button
-          .setButtonText("Show")
-          .setTooltip("Show secret value")
-          .onClick(() => toggleSecretInput(inputEl, button.buttonEl));
-      })
-      .addButton((button) => {
-        button
-          .setButtonText("Guide")
-          .setTooltip("Open Firebase credential guide")
-          .onClick(() => window.open(FIREBASE_CREDENTIALS_GUIDE_URL, "_blank", "noopener"));
-      });
+      let firebaseRefreshInputEl: HTMLInputElement | null = null;
+      new Setting(containerEl)
+        .setName("Firebase refresh token")
+        .setDesc("Use stsTokenManager.refreshToken from the TTSReader Firebase auth record. Treat it like a password.")
+        .addText((text) => {
+          text
+            .setPlaceholder("AMf-vB...")
+            .setValue(this.plugin.settings.firebaseRefreshToken)
+            .onChange(async (value) => {
+              this.plugin.settings.firebaseRefreshToken = normalizeCredential(value);
+              this.plugin.settings.firebaseAccessToken = "";
+              this.plugin.settings.firebaseAccessTokenExpiresAt = 0;
+              await this.plugin.saveSettings();
+            });
+          text.inputEl.type = "password";
+          firebaseRefreshInputEl = text.inputEl;
+        })
+        .addButton((button) => {
+          if (!firebaseRefreshInputEl) {
+            return;
+          }
+          const inputEl = firebaseRefreshInputEl;
+          button
+            .setButtonText("Show")
+            .setTooltip("Show secret value")
+            .onClick(() => toggleSecretInput(inputEl, button.buttonEl));
+        })
+        .addButton((button) => {
+          button
+            .setButtonText("Guide")
+            .setTooltip("Open Firebase credential guide")
+            .onClick(() => window.open(FIREBASE_CREDENTIALS_GUIDE_URL, "_blank", "noopener"));
+        });
+    }
 
-    let bosonApiKeyInputEl: HTMLInputElement | null = null;
-    new Setting(containerEl)
-      .setName("Boson API key")
-      .setDesc("Use a Boson API key for Higgs Audio TTS. Keys usually start with bai-.")
-      .addText((text) => {
-        text
-          .setPlaceholder("bai-...")
-          .setValue(this.plugin.settings.bosonApiKey)
-          .onChange(async (value) => {
-            this.plugin.settings.bosonApiKey = normalizeCredential(value);
-            await this.plugin.saveSettings();
-          });
-        text.inputEl.type = "password";
-        bosonApiKeyInputEl = text.inputEl;
-      })
-      .addButton((button) => {
-        if (!bosonApiKeyInputEl) {
-          return;
-        }
-        const inputEl = bosonApiKeyInputEl;
-        button
-          .setButtonText("Show")
-          .setTooltip("Show secret value")
-          .onClick(() => toggleSecretInput(inputEl, button.buttonEl));
-      });
+    if (this.plugin.settings.ttsProvider === "boson") {
+      let bosonApiKeyInputEl: HTMLInputElement | null = null;
+      new Setting(containerEl)
+        .setName("Boson API key")
+        .setDesc("Use a Boson API key for Higgs Audio TTS. Keys usually start with bai-.")
+        .addText((text) => {
+          text
+            .setPlaceholder("bai-...")
+            .setValue(this.plugin.settings.bosonApiKey)
+            .onChange(async (value) => {
+              this.plugin.settings.bosonApiKey = normalizeCredential(value);
+              await this.plugin.saveSettings();
+            });
+          text.inputEl.type = "password";
+          bosonApiKeyInputEl = text.inputEl;
+        })
+        .addButton((button) => {
+          if (!bosonApiKeyInputEl) {
+            return;
+          }
+          const inputEl = bosonApiKeyInputEl;
+          button
+            .setButtonText("Show")
+            .setTooltip("Show secret value")
+            .onClick(() => toggleSecretInput(inputEl, button.buttonEl));
+        });
+    }
 
     this.voices = await waitForVoices();
     const providerVoices = filterVoicesForProvider(this.voices, this.plugin.settings.ttsProvider);
