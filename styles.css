@@ -74,7 +74,7 @@
   border-radius: 6px;
   display: inline-flex;
   gap: 6px;
-  max-width: 178px;
+  max-width: 224px;
   padding: 0 6px;
 }
 
@@ -104,6 +104,7 @@
 }
 
 .ttsreader-plugin-statusbar-label {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -111,10 +112,11 @@
 
 .ttsreader-plugin-statusbar-time {
   color: var(--text-muted);
+  flex: 0 0 auto;
   font-variant-numeric: tabular-nums;
-  max-width: 76px;
+  min-width: 92px;
   overflow: hidden;
-  text-overflow: ellipsis;
+  text-overflow: clip;
   white-space: nowrap;
 }
 
