@@ -1181,6 +1181,7 @@ class TtsReaderSettingTab extends PluginSettingTab {
           });
       });
 
+    let readerVoiceId = selectedVoiceId;
     new Setting(containerEl)
       .setName("Reader")
       .setDesc(`${filteredVoices.length} of ${providerVoices.length} voices shown`)
@@ -1191,6 +1192,7 @@ class TtsReaderSettingTab extends PluginSettingTab {
           dropdown.addOption(voice.id, `${voice.name} (${badge}, ${source})`);
         }
         dropdown.setValue(selectedVoiceId).onChange(async (value) => {
+          readerVoiceId = value;
           this.plugin.settings.preferredVoiceId = value;
           await this.plugin.saveSettings();
         });
@@ -1200,8 +1202,7 @@ class TtsReaderSettingTab extends PluginSettingTab {
           .setButtonText("Play sample")
           .setDisabled(!selectedVoiceId)
           .onClick(async () => {
-            const voice = providerVoices.find((candidate) => candidate.id === this.plugin.settings.preferredVoiceId) ??
-              providerVoices.find((candidate) => candidate.id === selectedVoiceId);
+            const voice = providerVoices.find((candidate) => candidate.id === readerVoiceId);
             if (!voice) {
               new Notice("TTSReader: no voice selected.");
               return;

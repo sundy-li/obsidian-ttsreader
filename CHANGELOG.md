@@ -10,6 +10,11 @@ All notable changes to this project will be documented in this file.
 - Added a Chinese user guide.
 - Added settings page and command palette screenshots to the English and Chinese user guides.
 
+### Fixed
+
+- Prevented status bar playback time from being truncated.
+- Made the settings page voice sample button use the currently selected reader voice.
+
 ### Removed
 
 - Removed the TTSReader premium account sign-in shortcut from settings and commands.
