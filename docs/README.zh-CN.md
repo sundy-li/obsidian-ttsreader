@@ -74,6 +74,20 @@ TTSReader 平台提供浏览器语音和 TTSReader 服务端语音。
 
 你也可以点击左侧 ribbon 图标，或者运行 `Open TTSReader` 打开阅读窗口。阅读窗口里可以输入文本、切换平台、切换阅读者、试听语音和播放文本。
 
+## 设置页
+
+设置页会根据当前平台显示对应的密钥输入框。选择 `Boson Higgs Audio` 时，只会显示 Boson API Key，然后可以继续设置语言、地区/口音、声音筛选、阅读者、服务端模式和默认语速。
+
+![选择 Boson Higgs Audio 后的 TTSReader 设置页](assets/settings-boson.png)
+
+阅读者下拉框旁边的 `Play sample` 可以用来试听当前声音，确认后再用它朗读笔记内容。
+
+## 命令面板
+
+你可以在 Obsidian 命令面板中运行 `TTSReader: Read the selected text`，直接朗读当前编辑器选中的文本。默认快捷键是 `Mod+Shift+R`，在 macOS 上显示为 `Cmd+Shift+R`，在 Windows/Linux 上显示为 `Ctrl+Shift+R`。
+
+![Obsidian 命令面板中的 TTSReader: Read the selected text](assets/command-palette-read-selected.png)
+
 ## 配置 Boson
 
 1. 打开 `Settings` -> `TTSReader`。
@@ -112,7 +126,6 @@ Boson 的声音是云端预设声音，不依赖浏览器声音列表。
 - `Read the selected text`：朗读当前选中的编辑器文本。
 - `Speak selection or current note`：朗读选中文本；如果没有选中文本，则朗读当前笔记。
 - `Stop TTSReader playback`：停止当前播放。
-- `Open TTSReader sign-in page`：打开 TTSReader 网站登录页面。
 
 ## 常见问题
 

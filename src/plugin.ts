@@ -25,7 +25,6 @@ import {
   type VoiceLanguageGroup,
 } from "./plugin-state.js";
 
-const TTSREADER_SIGN_IN_URL = "https://ttsreader.com/player/";
 const FIREBASE_CREDENTIALS_GUIDE_URL = "https://github.com/sundy-li/obsidian-ttsreader/blob/main/docs/firebase-credentials.md";
 const BOSON_API_KEY_GUIDE_URL = "https://www.boson.ai/workspace/api-key";
 const ESTIMATED_SPEECH_CHARS_PER_SECOND = 13;
@@ -94,12 +93,6 @@ export default class TtsReaderPlugin extends Plugin {
       callback: () => this.stopPlayback(),
     });
 
-    this.addCommand({
-      id: "open-ttsreader-sign-in",
-      name: "Open TTSReader sign-in page",
-      callback: () => this.openTtsReaderSignIn(),
-    });
-
     this.registerEvent(
       this.app.workspace.on("editor-menu", (menu, editor) => {
         const selectedText = editor.getSelection();
@@ -126,11 +119,6 @@ export default class TtsReaderPlugin extends Plugin {
 
   openReader(initialText = ""): void {
     new TtsReaderModal(this.app, this, initialText).open();
-  }
-
-  openTtsReaderSignIn(): void {
-    window.open(TTSREADER_SIGN_IN_URL, "_blank", "noopener");
-    new Notice("TTSReader sign-in opened. Browser cookies are not shared with Obsidian.");
   }
 
   async readSelectedText(selectedText: string): Promise<void> {
@@ -1259,16 +1247,6 @@ class TtsReaderSettingTab extends PluginSettingTab {
           });
       });
 
-    new Setting(containerEl)
-      .setName("Premium account sign-in")
-      .setDesc(
-        "Opens the TTSReader player in your browser. Obsidian cannot read Google/Apple login cookies from that browser session; paste Firebase credentials or a UAPI key for authenticated playback.",
-      )
-      .addButton((button) => {
-        button
-          .setButtonText("Open TTSReader")
-          .onClick(() => this.plugin.openTtsReaderSignIn());
-      });
   }
 
   private chooseLanguageCode(): string {

@@ -8,6 +8,11 @@ All notable changes to this project will be documented in this file.
 
 - Reworked the README as a user guide.
 - Added a Chinese user guide.
+- Added settings page and command palette screenshots to the English and Chinese user guides.
+
+### Removed
+
+- Removed the TTSReader premium account sign-in shortcut from settings and commands.
 
 ## 0.1.8 - 2026-06-17
 

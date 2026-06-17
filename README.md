@@ -74,6 +74,20 @@ The plugin does not enforce TTSReader Premium quota locally. If a voice is unava
 
 You can also click the ribbon icon or run `Open TTSReader` to open a reader window with a text box, platform selector, voice selector, sample button, and playback controls.
 
+## Settings Page
+
+The settings page keeps provider-specific credentials together with voice controls. When you choose `Boson Higgs Audio`, the page shows only the Boson API key field, then lets you pick language, region/accent, voice filter, reader voice, server mode, and default rate.
+
+![TTSReader settings page with Boson Higgs Audio selected](docs/assets/settings-boson.png)
+
+Use `Play sample` beside the reader selector to confirm the voice before using it on your notes.
+
+## Command Palette
+
+Run `TTSReader: Read the selected text` from the command palette to speak the current editor selection. The command includes the default shortcut `Mod+Shift+R`, shown as `Cmd+Shift+R` on macOS and `Ctrl+Shift+R` on Windows/Linux.
+
+![Obsidian command palette showing TTSReader: Read the selected text](docs/assets/command-palette-read-selected.png)
+
 ## Configure Boson
 
 1. Open `Settings` -> `TTSReader`.
@@ -112,7 +126,6 @@ Boson voices are bundled as preset cloud voices and do not depend on the browser
 - `Read the selected text`: read the currently selected editor text.
 - `Speak selection or current note`: read selected text, or the current note if nothing is selected.
 - `Stop TTSReader playback`: stop current playback.
-- `Open TTSReader sign-in page`: open the TTSReader website sign-in page.
 
 ## Troubleshooting
 
