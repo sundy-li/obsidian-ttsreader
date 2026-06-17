@@ -234,8 +234,6 @@ describe("TTSReader SDK", () => {
       model: "higgs-audio-v3-tts",
       input: "Hello from Boson",
       voice: "chloe",
-      response_format: "wav",
-      speed: 1.2,
     });
   });
 
