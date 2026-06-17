@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Documentation
+
+- Reworked the README as a user guide.
+- Added a Chinese user guide.
+
 ## 0.1.8 - 2026-06-17
 
 ### Added

@@ -1,92 +1,146 @@
-# Obsidian TTSReader
+# TTSReader for Obsidian
 
-Read Obsidian notes aloud with browser voices, TTSReader server voices, or Boson Higgs Audio voices.
+TTSReader reads your Obsidian notes aloud. It can read selected text, the current note, or text you paste into the reader window.
 
-This project contains an Obsidian desktop plugin plus a small TypeScript SDK for text-to-speech providers.
+[中文文档](docs/README.zh-CN.md)
 
-## Features
+## What It Does
 
-- Read the selected text or the current note from Obsidian.
+- Read selected text from the editor.
+- Read the current note when no text is selected.
 - Add `Read the selected text` to the command palette and editor right-click menu.
-- Choose voices by language, region/accent, and `All` / `Premium` / `Basic`.
-- Play a sample from the voice picker before reading.
-- Use browser/Web Speech voices for local playback.
-- Use bundled TTSReader server voices for cloud playback.
-- Use Boson Higgs Audio TTS with the `higgs-audio-v3-tts` model.
-- Optionally use a TTSReader `UAPI-*` key, a temporary Bearer token, or Firebase refresh credentials for authenticated server playback.
-- Optionally use a Boson `bai-...` API key for Boson playback.
+- Choose a voice by platform, language, region/accent, and Basic/Premium filter.
+- Play a voice sample before reading.
+- Show playback state and visible error messages in the Obsidian status bar.
+- Cache recently generated audio so repeated playback does not always call the API again.
+
+## Voice Platforms
+
+### Boson Higgs Audio
+
+Boson Higgs Audio is the default platform for new installs.
+
+Use it if you want cloud TTS with the bundled Boson preset voices:
+
+- Chloe
+- Eleanor
+- Jake
+- Marcus
+- Nora
+- Oliver
+
+You need a Boson API key. Open the plugin settings, choose `Boson Higgs Audio`, paste your key into `Boson API key`, or use the `Guide` button to open the Boson API key page.
+
+### TTSReader
+
+TTSReader provides browser voices and TTSReader server voices.
+
+Use it if you want:
+
+- Browser/Web Speech voices exposed by the current Obsidian desktop runtime.
+- TTSReader server voices.
+- TTSReader authenticated playback with a UAPI key, Bearer token, or Firebase refresh credentials.
+
+The plugin does not enforce TTSReader Premium quota locally. If a voice is unavailable or a quota is exceeded, the TTSReader API response will decide and the plugin will show the error.
 
 ## Installation
 
-### From a GitHub release
+### Install From GitHub Releases
 
-1. Download `main.js`, `manifest.json`, and `styles.css` from the latest release.
-2. Create this folder in your vault:
+1. Open the latest release: <https://github.com/sundy-li/obsidian-ttsreader/releases/latest>
+2. Download these three files:
+   - `main.js`
+   - `manifest.json`
+   - `styles.css`
+3. In your Obsidian vault, create this folder:
 
    ```text
    <your vault>/.obsidian/plugins/ttsreader/
    ```
 
-3. Put the three files into that folder.
-4. Restart Obsidian and enable `TTSReader` in Community plugins.
+4. Put the three downloaded files into that folder.
+5. Restart Obsidian.
+6. Open `Settings` -> `Community plugins`.
+7. Enable `TTSReader`.
 
-### From source
+## Quick Start
 
-```bash
-npm install
-npm run build
-```
+1. Open `Settings` -> `TTSReader`.
+2. Choose a text-to-speech platform.
+3. Add the required API key or credentials for that platform.
+4. Choose a reader voice.
+5. Select text in a note.
+6. Run `Read the selected text` from the command palette or editor right-click menu.
 
-Then copy these files into your vault plugin folder:
+You can also click the ribbon icon or run `Open TTSReader` to open a reader window with a text box, platform selector, voice selector, sample button, and playback controls.
 
-```text
-dist/main.js -> <your vault>/.obsidian/plugins/ttsreader/main.js
-manifest.json -> <your vault>/.obsidian/plugins/ttsreader/manifest.json
-styles.css -> <your vault>/.obsidian/plugins/ttsreader/styles.css
-```
+## Configure Boson
 
-## Usage
+1. Open `Settings` -> `TTSReader`.
+2. Set `Text-to-speech platform` to `Boson Higgs Audio`.
+3. Paste your Boson API key into `Boson API key`.
+4. Click `Show` if you need to verify the pasted value.
+5. Click `Guide` if you need to open the Boson API key page.
+6. Choose a reader voice.
 
-- Open the ribbon icon or run `Open TTSReader`.
-- Select text and run `Read the selected text`.
-- Right-click selected editor text and choose `Read the selected text`.
-- Choose `TTSReader` or `Boson Higgs Audio` in settings or in the reader modal.
-- Use `Stop TTSReader playback` to stop audio.
+Boson keys usually start with `bai-`.
 
-## Providers and credentials
+## Configure TTSReader
 
-### TTSReader
+1. Open `Settings` -> `TTSReader`.
+2. Set `Text-to-speech platform` to `TTSReader`.
+3. Choose one authentication method:
+   - `Authorization / UAPI Key`: paste a `UAPI-...` key or a short-lived `Bearer eyJ...` token.
+   - `Firebase API key` plus `Firebase refresh token`: lets the plugin refresh short-lived cloud playback tokens automatically.
+4. Choose a reader voice.
 
-The plugin can open the TTSReader sign-in page from settings, but Obsidian cannot read Google/Apple login cookies from your external browser session.
+For Firebase credential extraction, see [Firebase credentials](docs/firebase-credentials.md).
 
-For authenticated TTSReader server voices, use one of these credential options:
+Treat Bearer tokens, Firebase refresh tokens, UAPI keys, and Boson API keys like passwords.
 
-- `UAPI-...`: Uses the official TTSReader UAPI export path.
-- `Bearer eyJ...`: Uses the TTSReader cloud playback endpoint with the pasted bearer token.
-- `Firebase API key` + `Firebase refresh token`: Refreshes the short-lived cloud playback Bearer token automatically.
+## Voice List Notes
 
-Bearer and Firebase refresh tokens are not Cookies and should be treated like passwords. Cloud playback mirrors the website test/playback path; account permissions and quota errors come from the TTSReader API response.
+The Basic voice list means “voices that this Obsidian desktop runtime can actually play.”
 
-The Basic voice list shows voices that the current Obsidian runtime can actually play. Some Basic voices shown on the TTSReader website, such as browser-provided Aria or Michelle voices, may not appear in Obsidian if Electron does not expose them through `speechSynthesis.getVoices()`.
+Some Basic voices shown on the TTSReader website are provided by the browser. Obsidian runs inside Electron, so voices such as Aria, Michelle, or Jenny may not appear unless Electron exposes them through `speechSynthesis.getVoices()`.
 
-See [Firebase credentials](docs/firebase-credentials.md) for copy-paste Console snippets that extract the API key and refresh token from a signed-in TTSReader browser session.
+Boson voices are bundled as preset cloud voices and do not depend on the browser voice list.
 
-### Boson Higgs Audio
+## Commands
 
-Select `Boson Higgs Audio` as the text-to-speech platform and paste a Boson API key into `Boson API key`.
+- `Open TTSReader`: open the reader window.
+- `Read the selected text`: read the currently selected editor text.
+- `Speak selection or current note`: read selected text, or the current note if nothing is selected.
+- `Stop TTSReader playback`: stop current playback.
+- `Open TTSReader sign-in page`: open the TTSReader website sign-in page.
 
-The plugin uses `POST https://api.boson.ai/v1/audio/speech` with model `higgs-audio-v3-tts`. The bundled Boson voice list is `chloe`, `eleanor`, `jake`, `marcus`, `nora`, and `oliver`.
+## Troubleshooting
 
-## Development
+### Nothing Plays
 
-```bash
-npm test
-npm run check
-npm run build
-npm run update:voices
-```
+- Check that the selected platform has the right credential configured.
+- Try `Play sample` for the selected voice.
+- Watch the Obsidian status bar or plugin notice for an error message.
+- For Boson, confirm your API key starts with `bai-`.
+- For TTSReader server voices, confirm you have a valid UAPI key, Bearer token, or Firebase refresh credentials.
 
-`npm run update:voices` refreshes the generated TTSReader server voice list from the website bundle.
+### The TTSReader Website Shows a Voice That the Plugin Does Not Show
+
+That voice may be a browser-provided voice available in Chrome, Edge, or Safari, but not available in Obsidian/Electron. The plugin only lists browser voices that Obsidian can actually play.
+
+### TTSReader Authorization Expires
+
+Short-lived Bearer tokens expire quickly. Use `Firebase API key` plus `Firebase refresh token` if you want the plugin to refresh cloud playback authorization automatically.
+
+### Premium Voice Fails
+
+The plugin no longer blocks Premium usage locally. If the account, voice, or quota is not allowed, the API response will be shown as an error.
+
+## Privacy And Credentials
+
+Credentials are stored in this plugin's Obsidian plugin data. Anyone who can read your vault configuration files may be able to read those credentials. Do not publish your vault's `.obsidian/plugins/ttsreader/data.json`.
+
+The plugin sends text to the selected cloud provider when using Boson Higgs Audio or TTSReader server voices. Browser voices are handled by the local Web Speech runtime exposed by Obsidian.
 
 ## License
 
