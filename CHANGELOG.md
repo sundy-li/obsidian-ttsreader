@@ -14,6 +14,8 @@ All notable changes to this project will be documented in this file.
 
 - Prevented status bar playback time from being truncated.
 - Made the settings page voice sample button use the currently selected reader voice.
+- Made selected-text playback persist and use the resolved reader voice.
+- Sent explicit non-streaming MP3 options with Boson speech requests.
 
 ### Removed
 

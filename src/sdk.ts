@@ -219,6 +219,8 @@ export class TtsReaderClient {
         model: "higgs-audio-v3-tts",
         input: options.text,
         voice: options.voiceId,
+        response_format: "mp3",
+        stream: false,
       }),
     });
 

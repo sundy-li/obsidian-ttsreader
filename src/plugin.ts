@@ -135,6 +135,8 @@ export default class TtsReaderPlugin extends Plugin {
       return;
     }
 
+    this.settings.preferredVoiceId = voice.id;
+    await this.saveSettings();
     await this.speak(text, voice.id, this.settings.defaultRate, this.settings.preferredMode, this.settings.ttsProvider);
   }
 
