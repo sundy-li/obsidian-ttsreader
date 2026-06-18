@@ -1,7 +1,7 @@
 {
   "id": "ttsreader",
   "name": "TTSReader",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "minAppVersion": "1.5.0",
   "description": "Read selected notes aloud with browser voices or TTSReader server voices.",
   "author": "sundy-li",
