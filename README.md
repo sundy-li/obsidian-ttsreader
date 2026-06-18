@@ -22,6 +22,7 @@ Boson Higgs Audio is the default platform for new installs.
 
 Use it if you want cloud TTS with the bundled Boson preset voices:
 
+- Berlinda
 - Chloe
 - Eleanor
 - Jake
@@ -30,6 +31,8 @@ Use it if you want cloud TTS with the bundled Boson preset voices:
 - Oliver
 
 You need a Boson API key. Open the plugin settings, choose `Boson Higgs Audio`, paste your key into `Boson API key`, or use the `Guide` button to open the Boson API key page.
+
+Boson currently returns audio even for unknown `voice` values, so a successful response does not always prove the selected voice id was recognized. If a preset voice sounds inconsistent, try `Berlinda`, which is the voice id used in Boson's official curl example.
 
 ### TTSReader
 

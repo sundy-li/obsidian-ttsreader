@@ -9,9 +9,11 @@ All notable changes to this project will be documented in this file.
 - Reworked the README as a user guide.
 - Added a Chinese user guide.
 - Added settings page and command palette screenshots to the English and Chinese user guides.
+- Documented Boson's unknown voice fallback behavior.
 
 ### Fixed
 
+- Added Berlinda from Boson's official curl example as the first Boson voice option.
 - Prevented status bar playback time from being truncated.
 - Made the settings page voice sample button use the currently selected reader voice.
 - Made selected-text playback persist and use the resolved reader voice.

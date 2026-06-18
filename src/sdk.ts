@@ -58,6 +58,7 @@ const DEFAULT_BOSON_SPEECH_ENDPOINT = "https://api.boson.ai/v1/audio/speech";
 const DEFAULT_FIREBASE_REFRESH_ENDPOINT = "https://securetoken.googleapis.com/v1/token";
 
 const BOSON_VOICES = [
+  { id: "berlinda", name: "Berlinda", gender: "f" },
   { id: "chloe", name: "Chloe", gender: "f" },
   { id: "eleanor", name: "Eleanor", gender: "f" },
   { id: "jake", name: "Jake", gender: "m" },

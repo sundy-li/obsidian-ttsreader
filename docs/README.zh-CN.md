@@ -22,6 +22,7 @@ Boson Higgs Audio 是新安装时的默认平台。
 
 如果你希望使用云端 TTS，并使用 Boson 的预设声音，可以选择这个平台。目前内置这些声音：
 
+- Berlinda
 - Chloe
 - Eleanor
 - Jake
@@ -30,6 +31,8 @@ Boson Higgs Audio 是新安装时的默认平台。
 - Oliver
 
 你需要配置 Boson API Key。打开插件设置，选择 `Boson Higgs Audio`，然后把 Key 粘贴到 `Boson API key`。也可以点击旁边的 `Guide` 打开 Boson API Key 页面。
+
+Boson 目前即使收到不存在的 `voice` 值，也可能返回一段音频，所以请求成功不一定代表它识别了你选择的 voice id。如果某个预设声音听起来不稳定，可以先试 `Berlinda`，这是 Boson 官方 curl 示例里使用的 voice id。
 
 ### TTSReader
 

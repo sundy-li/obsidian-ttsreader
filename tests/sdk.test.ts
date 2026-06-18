@@ -17,7 +17,7 @@ describe("TTSReader SDK", () => {
 
     assert.deepEqual(
       voices.map((voice) => voice.id),
-      ["chloe", "eleanor", "jake", "marcus", "nora", "oliver"],
+      ["berlinda", "chloe", "eleanor", "jake", "marcus", "nora", "oliver"],
     );
     assert.ok(voices.every((voice) => voice.source === "boson"));
     assert.ok(voices.every((voice) => voice.isPremium === false));
